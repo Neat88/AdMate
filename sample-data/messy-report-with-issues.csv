@@ -1,0 +1,13 @@
+Date,Campaign name,Ad set name,Amount spent,Impressions,Link clicks,Results,Conversion value
+2026-09-01,Test Campaign A,Set 1,120.00,45000,900,12,780.00
+2026-09-02,Test Campaign A,Set 1,118.50,44200,875,-,760.00
+2026-09-03,Test Campaign A,Set 1,,43100,860,11,701.00
+2026-09-04,Test Campaign A,Set 1,122.75,41900,42000,9,640.00
+2026-09-05,Test Campaign A,Set 1,119.20,42800,880,10,712.00
+2026-09-05,Test Campaign A,Set 1,119.20,42800,880,10,712.00
+2026-09-06,Test Campaign B,Set 2,88.00,N/A,410,0,0
+2026-09-07,Test Campaign B,Set 2,91.30,29500,398,0,0
+2026-09-08,Test Campaign B,Set 2,"1.234,56",30100,415,2,144.00
+not a date,Test Campaign B,Set 2,85.00,28900,390,1,72.00
+
+Total,,,,,,,

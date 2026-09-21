@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/*
+ * AdMate design tokens.
+ *
+ * Status is never communicated by colour alone: every priority and delta also
+ * carries an icon, a text label, or a directional arrow. Colour is the fast
+ * path, not the only path.
+ */
+@theme {
+  --color-ink-50:  #f6f7f9;
+  --color-ink-100: #eceef2;
+  --color-ink-200: #d9dde5;
+  --color-ink-300: #b6bdcb;
+  --color-ink-400: #8b95a8;
+  --color-ink-500: #667085;
+  --color-ink-600: #4b5565;
+  --color-ink-700: #364152;
+  --color-ink-800: #202939;
+  --color-ink-900: #121926;
+
+  --color-brand-50:  #eef4ff;
+  --color-brand-100: #dae4ff;
+  --color-brand-200: #bdd0ff;
+  --color-brand-300: #90b0ff;
+  --color-brand-400: #5b85fd;
+  --color-brand-500: #365df6;
+  --color-brand-600: #2442eb;
+  --color-brand-700: #1c33d8;
+  --color-brand-800: #1d2daf;
+  --color-brand-900: #1d2c8a;
+
+  --color-high-50:  #fef2f2;
+  --color-high-200: #fecaca;
+  --color-high-500: #ef4444;
+  --color-high-700: #b91c1c;
+
+  --color-med-50:  #fffbeb;
+  --color-med-200: #fde68a;
+  --color-med-500: #f59e0b;
+  --color-med-700: #b45309;
+
+  --color-low-50:  #f0f9ff;
+  --color-low-200: #bae6fd;
+  --color-low-500: #0ea5e9;
+  --color-low-700: #0369a1;
+
+  --color-good-50:  #f0fdf4;
+  --color-good-200: #bbf7d0;
+  --color-good-500: #22c55e;
+  --color-good-700: #15803d;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--color-ink-50);
+  color: var(--color-ink-900);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+/* Tabular figures keep metric columns from shifting as values change. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+  .print-break { break-inside: avoid; }
+}

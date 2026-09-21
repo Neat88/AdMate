@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+build/
+# SQLite database and its WAL/SHM sidecars - never commit user ad data.
+data/*.db
+data/*.db-*
+data/uploads/
+.env
+.env.local
+*.tsbuildinfo
+.DS_Store

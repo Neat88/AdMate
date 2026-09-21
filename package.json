@@ -1,0 +1,39 @@
+{
+  "name": "admate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AdMate - AI marketing analyst for social advertising performance",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test --import tsx src/lib/analysis/__tests__/*.test.ts",
+    "seed": "tsx scripts/seed.ts",
+    "db:reset": "rm -f data/admate.db && tsx scripts/seed.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "better-sqlite3": "^11.10.0",
+    "next": "15.5.4",
+    "papaparse": "^5.5.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "recharts": "^2.15.4",
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.3",
+    "@types/papaparse": "^5.3.16",
+    "@types/react": "19.1.0",
+    "@types/react-dom": "19.1.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.13",
+    "tsx": "^4.20.5",
+    "typescript": "^5.8.3"
+  }
+}
