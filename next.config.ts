@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Emits .next/standalone: a self-contained server with only the traced
+  // dependencies, which keeps the deployed image small.
+  output: "standalone",
   // better-sqlite3 is a native module: keep it external to the server bundle.
   serverExternalPackages: ["better-sqlite3"],
   experimental: {

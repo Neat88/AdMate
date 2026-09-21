@@ -1,0 +1,35 @@
+# Rename `app` before deploying, or run `fly launch --no-deploy` to generate it.
+app = "admate"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  ADMATE_DB_PATH = "/data/admate.db"
+
+# SQLite needs a real disk. Create it once with:
+#   fly volumes create admate_data --size 1 --region iad
+[mounts]
+  source = "admate_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  # A single writer: SQLite does not tolerate two machines on one volume.
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

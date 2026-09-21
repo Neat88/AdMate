@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+data
+*.md
+!README.md
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store
+coverage

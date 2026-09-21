@@ -29,6 +29,15 @@ password: admate-demo-2026
 
 Or create your own account at `/signup` and upload one of the files in `sample-data/`.
 
+### Deploying it somewhere public
+
+See **[DEPLOY.md](DEPLOY.md)**. Short version: AdMate stores data in SQLite, so it
+needs a host with a **persistent volume** — Railway, Render, Fly.io or any Docker
+host. It will **not** run on Vercel or other serverless platforms without moving
+the database layer to Postgres first, because their filesystems are read-only.
+
+A `Dockerfile` plus `railway.json`, `render.yaml` and `fly.toml` are included.
+
 ### Running in production mode
 
 ```bash
@@ -155,7 +164,7 @@ src/
       recommendations/   cross-report tracker with status filters
       alerts/            rule builder + triggered alerts
       workspaces/        per-client separation
-    api/                 auth, upload, recommendations, alerts, workspace
+    api/                 auth, upload, recommendations, alerts, workspace, health
   components/ui/         shell, KPI cards, charts, tables, insight card, primitives
   lib/
     analysis/

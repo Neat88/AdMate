@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: admate
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # free tier has no persistent disk; SQLite needs one
+    healthCheckPath: /api/health
+    disk:
+      name: admate-data
+      mountPath: /data       # must match ADMATE_DB_PATH below
+      sizeGB: 1
+    envVars:
+      - key: SESSION_SECRET
+        generateValue: true  # Render generates and stores a strong secret
+      - key: ADMATE_DB_PATH
+        value: /data/admate.db
+      - key: ANTHROPIC_API_KEY
+        sync: false          # optional; set in the dashboard to enable Claude
