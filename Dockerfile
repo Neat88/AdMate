@@ -49,8 +49,6 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     ADMATE_DB_PATH=/data/admate.db
 
-# Run unprivileged. The volume is chowned so SQLite can create its database
-# and the WAL/SHM sidecars alongside it.
 RUN groupadd --system --gid 1001 nodejs \
     && useradd --system --uid 1001 --gid nodejs nextjs \
     && mkdir -p /data \
@@ -60,14 +58,18 @@ RUN groupadd --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --chmod=0755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER nextjs
 EXPOSE 3000
 
-# Mounted by the host; declared so a plain `docker run` still persists data.
-VOLUME ["/data"]
+# No USER and no VOLUME here, deliberately:
+#   - The entrypoint starts as root only long enough to take ownership of the
+#     mounted volume, then drops to nextjs via setpriv.
+#   - A VOLUME instruction creates an anonymous volume that conflicts with the
+#     named volume Railway/Render/Fly mount at this path.
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["node", "server.js"]

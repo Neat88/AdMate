@@ -128,6 +128,25 @@ the image, so the demo experience works without a seeded account.
 
 ---
 
+## How the container handles the volume
+
+Railway, Render and Fly attach the persistent volume **at runtime**, after the
+image is built, and it arrives owned by `root`. A container that runs as an
+unprivileged user would start fine and then fail on the first write — the health
+check would pass and every signup would fail.
+
+`docker-entrypoint.sh` handles this: it starts as root, takes ownership of the
+directory holding `ADMATE_DB_PATH`, then drops to the unprivileged `nextjs`
+account (uid 1001) via `setpriv` before exec'ing the server. **The application
+process never runs as root.**
+
+Two details that matter if you edit it:
+
+- `setpriv` does not resolve user or group *names* — it fails with
+  "failed to parse reuid". The IDs are numeric on purpose.
+- There is no `VOLUME` instruction in the Dockerfile. It would create an
+  anonymous volume that conflicts with the named volume the host mounts.
+
 ## Operating notes
 
 - **Back up the volume.** The whole database is one file. `admate.db`, `admate.db-wal`
@@ -158,6 +177,25 @@ risk — that Next.js standalone output runs with the native SQLite module:
   pages rendering with real content. Static assets, the icon and the sample CSVs
   all served. No errors in the log.
 
+The privilege-dropping entrypoint was tested separately against a **root-owned
+volume**, reproducing exactly what these hosts mount: the directory was chowned
+from `0:0` to `1001:1001`, the server came up healthy, a signup succeeded, and
+the resulting `admate.db` was owned by uid 1001 — confirming the app writes to
+the volume without running as root.
+
 The Dockerfile's remaining risk is ordinary layer plumbing, which surfaces
 immediately on your first build. If it fails, the likely cause is the native
 module — check that the `deps` stage kept `python3 make g++`.
+
+## Troubleshooting a failed build
+
+Open the failed deployment on your host and read the **build logs** — the last
+20-30 lines name the failing step. Common causes:
+
+| Symptom in the log | Cause | Fix |
+| --- | --- | --- |
+| `npm ci` exits non-zero, mentions lockfile | `package.json` and `package-lock.json` out of sync | Run `npm install` locally, commit the lockfile |
+| `node-gyp` / `better_sqlite3` compile errors | Build toolchain missing | Confirm the `deps` stage still installs `python3 make g++` |
+| `JavaScript heap out of memory` | Build ran out of RAM | Raise the build resources on the host, or set `NODE_OPTIONS=--max-old-space-size=4096` as a build variable |
+| `failed to solve` / cannot pull base image | Registry blocked or rate-limited | Retry; if it persists the host's builder cannot reach Docker Hub |
+| Build succeeds, container restarts repeatedly | Runtime, not build | Check `SESSION_SECRET` is set and the volume is mounted at the path `ADMATE_DB_PATH` points into |
