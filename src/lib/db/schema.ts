@@ -147,6 +147,75 @@ function migrate(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_events_user ON alert_events(user_id, created_at DESC);
   `);
+
+  runVersionedMigrations(db);
+}
+
+/**
+ * Schema changes after the initial release. `PRAGMA user_version` records how
+ * many have been applied, so each runs exactly once on an existing database
+ * and in order on a fresh one. Append only - never edit a shipped migration.
+ */
+const MIGRATIONS: ((db: Database.Database) => void)[] = [
+  // 1: facts layer, decision tiers, and the report assistant.
+  (db) => {
+    const columns = (table: string) =>
+      new Set((db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name));
+    const analyses = columns("analyses");
+    if (!analyses.has("facts_json")) db.exec("ALTER TABLE analyses ADD COLUMN facts_json TEXT");
+    if (!analyses.has("engine_version")) db.exec("ALTER TABLE analyses ADD COLUMN engine_version INTEGER");
+    const recs = columns("recommendations");
+    if (!recs.has("tier")) db.exec("ALTER TABLE recommendations ADD COLUMN tier TEXT");
+    if (!recs.has("action_type")) db.exec("ALTER TABLE recommendations ADD COLUMN action_type TEXT");
+
+    db.exec(`
+      -- One assistant conversation per report per user.
+      CREATE TABLE IF NOT EXISTS conversations (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        report_id   TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+        summary     TEXT,
+        focus_json  TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_conversations_report ON conversations(report_id, user_id);
+
+      CREATE TABLE IF NOT EXISTS messages (
+        id              TEXT PRIMARY KEY,
+        conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role            TEXT NOT NULL,
+        content_json    TEXT NOT NULL,
+        focus_json      TEXT,
+        engine          TEXT,
+        input_tokens    INTEGER,
+        output_tokens   INTEGER,
+        created_at      TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id, created_at);
+
+      -- Per-user daily AI usage, for the quota.
+      CREATE TABLE IF NOT EXISTS ai_usage (
+        user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        day           TEXT NOT NULL,
+        requests      INTEGER NOT NULL DEFAULT 0,
+        input_tokens  INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (user_id, day)
+      );
+    `);
+  },
+];
+
+function runVersionedMigrations(db: Database.Database): void {
+  const current = db.pragma("user_version", { simple: true }) as number;
+  for (let v = current; v < MIGRATIONS.length; v++) {
+    db.transaction(() => {
+      MIGRATIONS[v](db);
+      db.pragma(`user_version = ${v + 1}`);
+    })();
+  }
 }
 
 export function resetDbForTests(): void {

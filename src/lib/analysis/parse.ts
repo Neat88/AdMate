@@ -298,6 +298,12 @@ export function normalizeRows(table: RawTable, mappings: ColumnMapping[]): Norma
       row[dim] = v === "" ? null : v;
     }
 
+    const resultTypeIdx = byKey.get("resultType");
+    if (resultTypeIdx !== undefined) {
+      const v = String(raw[resultTypeIdx] ?? "").trim();
+      row.resultType = v === "" ? null : v;
+    }
+
     let hasAnyMetric = false;
     for (const metric of BASE_METRICS) {
       const idx = byKey.get(metric);
@@ -367,7 +373,15 @@ export function normalizeRows(table: RawTable, mappings: ColumnMapping[]): Norma
         "Neither impressions nor clicks were found. Delivery and engagement analysis will be skipped.",
     });
   }
-  if (!availableMetrics.includes("conversions")) {
+  const resultsHeader = mappings.find((m) => m.key === "conversions" && /^results?\b/i.test(m.header.trim()));
+  if (resultsHeader && !byKey.has("resultType")) {
+    issues.push({
+      severity: "info",
+      code: "results_column_ambiguous",
+      message: `"${resultsHeader.header}" was read as conversions. On Meta, "Results" counts whatever each campaign optimises for (purchases, leads, link clicks, ThruPlays), so AdMate judges each campaign by the objective it detects rather than treating every result as a purchase. Include the "Result indicator" column in your export to make this exact.`,
+    });
+  }
+  if (!availableMetrics.includes("conversions") && !availableMetrics.includes("leads")) {
     issues.push({
       severity: "info",
       code: "no_conversions",

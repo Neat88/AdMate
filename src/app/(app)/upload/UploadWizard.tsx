@@ -42,10 +42,24 @@ const DIMENSION_OPTIONS: { value: ColumnKey | ""; label: string }[] = [
   { value: "campaign", label: "Campaign name" },
   { value: "adset", label: "Ad set / ad group name" },
   { value: "ad", label: "Ad / creative name" },
+  { value: "resultType", label: "Result type / objective" },
 ];
 
 const METRIC_OPTIONS: { value: ColumnKey; label: string }[] = (
-  ["impressions", "reach", "clicks", "spend", "conversions", "revenue", "frequency", "videoViews"] as BaseMetric[]
+  [
+    "impressions",
+    "reach",
+    "clicks",
+    "spend",
+    "conversions",
+    "revenue",
+    "leads",
+    "landingPageViews",
+    "engagements",
+    "videoViews",
+    "thruplays",
+    "frequency",
+  ] as BaseMetric[]
 ).map((m) => ({ value: m, label: METRIC_META[m].label }));
 
 const CURRENCIES = ["USD", "EUR", "GBP", "AUD", "CAD", "SGD", "JPY", "INR", "KHR", "THB", "VND", "PHP"];

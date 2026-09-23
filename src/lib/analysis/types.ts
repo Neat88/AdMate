@@ -27,15 +27,32 @@ export type BaseMetric =
   | "conversions"
   | "revenue"
   | "frequency"
-  | "videoViews";
+  | "videoViews"
+  | "leads"
+  | "landingPageViews"
+  | "engagements"
+  | "thruplays";
 
 /** Metrics AdMate computes itself, and only when every input exists. */
-export type DerivedMetric = "ctr" | "cpc" | "cpm" | "cpa" | "roas" | "cvr" | "aov";
+export type DerivedMetric =
+  | "ctr"
+  | "cpc"
+  | "cpm"
+  | "cpa"
+  | "roas"
+  | "cvr"
+  | "aov"
+  | "cpl"
+  | "leadRate"
+  | "costPerLpv"
+  | "cpe"
+  | "engagementRate"
+  | "costPerThruplay";
 
 export type MetricKey = BaseMetric | DerivedMetric;
 
 /** Dimension columns that describe *which* thing a row is about. */
-export type DimensionKey = "date" | "campaign" | "adset" | "ad";
+export type DimensionKey = "date" | "campaign" | "adset" | "ad" | "resultType";
 
 export type ColumnKey = DimensionKey | BaseMetric;
 
@@ -48,9 +65,27 @@ export const BASE_METRICS: BaseMetric[] = [
   "revenue",
   "frequency",
   "videoViews",
+  "leads",
+  "landingPageViews",
+  "engagements",
+  "thruplays",
 ];
 
-export const DERIVED_METRICS: DerivedMetric[] = ["ctr", "cpc", "cpm", "cpa", "roas", "cvr", "aov"];
+export const DERIVED_METRICS: DerivedMetric[] = [
+  "ctr",
+  "cpc",
+  "cpm",
+  "cpa",
+  "roas",
+  "cvr",
+  "aov",
+  "cpl",
+  "leadRate",
+  "costPerLpv",
+  "cpe",
+  "engagementRate",
+  "costPerThruplay",
+];
 
 export interface MetricMeta {
   key: MetricKey;
@@ -119,6 +154,34 @@ export const METRIC_META: Record<MetricKey, MetricMeta> = {
     higherIsBetter: true,
     description: "Video views recorded by the platform.",
   },
+  leads: {
+    key: "leads",
+    label: "Leads",
+    format: "decimal",
+    higherIsBetter: true,
+    description: "Leads (form submissions or lead events) recorded by the platform.",
+  },
+  landingPageViews: {
+    key: "landingPageViews",
+    label: "Landing page views",
+    format: "integer",
+    higherIsBetter: true,
+    description: "Clicks that went on to load the landing page.",
+  },
+  engagements: {
+    key: "engagements",
+    label: "Engagements",
+    format: "integer",
+    higherIsBetter: true,
+    description: "Post engagements (reactions, comments, shares, saves, clicks).",
+  },
+  thruplays: {
+    key: "thruplays",
+    label: "ThruPlays",
+    format: "integer",
+    higherIsBetter: true,
+    description: "Video plays watched to completion or for at least 15 seconds.",
+  },
   ctr: {
     key: "ctr",
     label: "CTR",
@@ -168,6 +231,48 @@ export const METRIC_META: Record<MetricKey, MetricMeta> = {
     higherIsBetter: true,
     description: "Revenue / conversions.",
   },
+  cpl: {
+    key: "cpl",
+    label: "CPL",
+    format: "currency",
+    higherIsBetter: false,
+    description: "Spend / leads.",
+  },
+  leadRate: {
+    key: "leadRate",
+    label: "Lead rate",
+    format: "percent",
+    higherIsBetter: true,
+    description: "Leads / clicks.",
+  },
+  costPerLpv: {
+    key: "costPerLpv",
+    label: "Cost per landing page view",
+    format: "currency",
+    higherIsBetter: false,
+    description: "Spend / landing page views.",
+  },
+  cpe: {
+    key: "cpe",
+    label: "Cost per engagement",
+    format: "currency",
+    higherIsBetter: false,
+    description: "Spend / engagements.",
+  },
+  engagementRate: {
+    key: "engagementRate",
+    label: "Engagement rate",
+    format: "percent",
+    higherIsBetter: true,
+    description: "Engagements / impressions.",
+  },
+  costPerThruplay: {
+    key: "costPerThruplay",
+    label: "Cost per ThruPlay",
+    format: "currency",
+    higherIsBetter: false,
+    description: "Spend / ThruPlays.",
+  },
 };
 
 /** One normalized row of an uploaded report. */
@@ -176,6 +281,12 @@ export interface NormalizedRow {
   campaign: string | null;
   adset: string | null;
   ad: string | null;
+  /**
+   * Platform "result type" / objective label for the row, when the export has
+   * one (Meta's "Result indicator", an "Objective" column). Optional so rows
+   * stored before this field existed still deserialize.
+   */
+  resultType?: string | null;
   metrics: Partial<Record<BaseMetric, number | null>>;
 }
 
@@ -225,5 +336,7 @@ export interface PeriodComparison {
   previousEnd: string;
   currentDays: number;
   previousDays: number;
+  /** Middle day left out of an odd-length window so both halves are equal. */
+  excludedDay?: string | null;
   deltas: Partial<Record<MetricKey, PeriodDelta>>;
 }

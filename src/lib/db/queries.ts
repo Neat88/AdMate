@@ -4,6 +4,8 @@ import type { ColumnMapping } from "@/lib/analysis/columns";
 import type { DataIssue } from "@/lib/analysis/parse";
 import type { Finding } from "@/lib/analysis/detectors";
 import type { Insight } from "@/lib/ai/insights";
+import type { ReportFacts } from "@/lib/analysis/facts";
+import type { Tier, ActionType } from "@/lib/analysis/diagnoses";
 import type { NormalizedRow, Platform } from "@/lib/analysis/types";
 import type { AlertEvent, AlertRule } from "@/lib/analysis/alerts";
 import { defaultRules } from "@/lib/analysis/alerts";
@@ -57,6 +59,9 @@ export interface RecommendationRecord {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Decision tier and action from the diagnosis this finding belongs to (null for pre-v1 analyses). */
+  tier: Tier | null;
+  actionType: ActionType | null;
 }
 
 export interface AnalysisRecord {
@@ -223,6 +228,7 @@ export interface SaveAnalysisInput {
   modelJson: string;
   findings: Finding[];
   insights: Insight[];
+  facts?: ReportFacts;
 }
 
 export function saveAnalysis(input: SaveAnalysisInput): string {
@@ -231,15 +237,20 @@ export function saveAnalysis(input: SaveAnalysisInput): string {
   const createdAt = now();
 
   const insertAnalysis = db.prepare(
-    `INSERT INTO analyses (id, report_id, user_id, engine, fallback_reason, summary, model_json, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO analyses (id, report_id, user_id, engine, fallback_reason, summary, model_json, facts_json,
+                           engine_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const insertRec = db.prepare(
     `INSERT INTO recommendations (id, analysis_id, report_id, user_id, finding_id, code, kind, priority,
                                   severity, confidence, entity_level, entity_name, title,
-                                  finding_json, insight_json, status, note, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?)`,
+                                  finding_json, insight_json, status, note, tier, action_type, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', NULL, ?, ?, ?, ?)`,
   );
+  const decisionByFinding = new Map<string, { tier: Tier; action: ActionType }>();
+  for (const d of input.facts?.diagnoses ?? []) {
+    for (const fid of d.findingIds) decisionByFinding.set(fid, { tier: d.tier, action: d.action });
+  }
 
   db.transaction(() => {
     insertAnalysis.run(
@@ -250,6 +261,8 @@ export function saveAnalysis(input: SaveAnalysisInput): string {
       input.fallbackReason,
       input.summary,
       input.modelJson,
+      input.facts ? JSON.stringify(input.facts) : null,
+      input.facts?.version ?? null,
       createdAt,
     );
     const insightById = new Map(input.insights.map((i) => [i.findingId, i]));
@@ -272,6 +285,8 @@ export function saveAnalysis(input: SaveAnalysisInput): string {
         finding.title,
         JSON.stringify(finding),
         JSON.stringify(insight),
+        decisionByFinding.get(finding.id)?.tier ?? null,
+        decisionByFinding.get(finding.id)?.action ?? null,
         createdAt,
         createdAt,
       );
@@ -299,6 +314,13 @@ export function getAnalysisModel(userId: string, analysisId: string): string | n
   return row?.model_json ?? null;
 }
 
+export function getAnalysisFacts(userId: string, analysisId: string): ReportFacts | null {
+  const row = getDb()
+    .prepare("SELECT facts_json FROM analyses WHERE id = ? AND user_id = ?")
+    .get(analysisId, userId) as { facts_json: string | null } | undefined;
+  return row?.facts_json ? (JSON.parse(row.facts_json) as ReportFacts) : null;
+}
+
 /* ----------------------------- recommendations --------------------------- */
 
 interface RecRow {
@@ -320,6 +342,8 @@ interface RecRow {
   note: string | null;
   createdAt: string;
   updatedAt: string;
+  tier: string | null;
+  actionType: string | null;
 }
 
 function hydrate(row: RecRow): RecommendationRecord {
@@ -342,6 +366,8 @@ function hydrate(row: RecRow): RecommendationRecord {
     note: row.note,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    tier: (row.tier as Tier | null) ?? null,
+    actionType: (row.actionType as ActionType | null) ?? null,
   };
 }
 
@@ -367,6 +393,8 @@ function recColumns(prefix = ""): string {
     `${p}note`,
     `${p}created_at AS createdAt`,
     `${p}updated_at AS updatedAt`,
+    `${p}tier`,
+    `${p}action_type AS actionType`,
   ].join(", ");
 }
 
@@ -586,4 +614,135 @@ export function dashboardCounts(userId: string, workspaceId?: string): Dashboard
   ).n;
 
   return { reports, openRecommendations: open, highPriority: high, unacknowledgedAlerts: alerts };
+}
+
+/* ------------------------------ assistant -------------------------------- */
+
+export interface ConversationRecord {
+  id: string;
+  reportId: string;
+  summary: string | null;
+  focusJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MessageRecord {
+  id: string;
+  role: "user" | "assistant";
+  contentJson: string;
+  focusJson: string | null;
+  engine: string | null;
+  createdAt: string;
+}
+
+/** The user's conversation about a report. Ownership of the report must already be checked. */
+export function getConversation(userId: string, reportId: string): ConversationRecord | null {
+  return (
+    (getDb()
+      .prepare(
+        `SELECT id, report_id AS reportId, summary, focus_json AS focusJson, created_at AS createdAt, updated_at AS updatedAt
+         FROM conversations WHERE report_id = ? AND user_id = ? ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(reportId, userId) as ConversationRecord | undefined) ?? null
+  );
+}
+
+export function createConversation(userId: string, reportId: string): ConversationRecord {
+  const id = newId("conv");
+  const createdAt = now();
+  getDb()
+    .prepare(
+      "INSERT INTO conversations (id, user_id, report_id, summary, focus_json, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?)",
+    )
+    .run(id, userId, reportId, createdAt, createdAt);
+  return { id, reportId, summary: null, focusJson: null, createdAt, updatedAt: createdAt };
+}
+
+export function updateConversation(
+  userId: string,
+  conversationId: string,
+  patch: { summary?: string | null; focusJson?: string | null },
+): void {
+  getDb()
+    .prepare(
+      `UPDATE conversations SET summary = COALESCE(?, summary), focus_json = COALESCE(?, focus_json), updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .run(patch.summary ?? null, patch.focusJson ?? null, now(), conversationId, userId);
+}
+
+export function deleteConversation(userId: string, reportId: string): boolean {
+  const result = getDb()
+    .prepare("DELETE FROM conversations WHERE report_id = ? AND user_id = ?")
+    .run(reportId, userId);
+  return result.changes > 0;
+}
+
+export function listMessages(userId: string, conversationId: string, limit = 100): MessageRecord[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, role, content_json AS contentJson, focus_json AS focusJson, engine, created_at AS createdAt
+       FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+    )
+    .all(conversationId, userId, limit) as MessageRecord[];
+  return rows.reverse();
+}
+
+export function addMessage(input: {
+  userId: string;
+  conversationId: string;
+  role: "user" | "assistant";
+  content: unknown;
+  focus?: unknown;
+  engine?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+}): string {
+  const id = newId("msg");
+  getDb()
+    .prepare(
+      `INSERT INTO messages (id, conversation_id, user_id, role, content_json, focus_json, engine, input_tokens, output_tokens, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      id,
+      input.conversationId,
+      input.userId,
+      input.role,
+      JSON.stringify(input.content),
+      input.focus === undefined ? null : JSON.stringify(input.focus),
+      input.engine ?? null,
+      input.inputTokens ?? null,
+      input.outputTokens ?? null,
+      now(),
+    );
+  return id;
+}
+
+export interface UsageRecord {
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+const today = () => new Date().toISOString().slice(0, 10);
+
+export function getUsageToday(userId: string): UsageRecord {
+  const row = getDb()
+    .prepare(
+      "SELECT requests, input_tokens AS inputTokens, output_tokens AS outputTokens FROM ai_usage WHERE user_id = ? AND day = ?",
+    )
+    .get(userId, today()) as UsageRecord | undefined;
+  return row ?? { requests: 0, inputTokens: 0, outputTokens: 0 };
+}
+
+export function recordUsage(userId: string, inputTokens: number, outputTokens: number): void {
+  getDb()
+    .prepare(
+      `INSERT INTO ai_usage (user_id, day, requests, input_tokens, output_tokens) VALUES (?, ?, 1, ?, ?)
+       ON CONFLICT(user_id, day) DO UPDATE SET requests = requests + 1,
+         input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`,
+    )
+    .run(userId, today(), inputTokens, outputTokens);
 }

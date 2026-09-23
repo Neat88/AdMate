@@ -2,6 +2,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Finding } from "@/lib/analysis/detectors";
 import { fmtValue } from "@/lib/analysis/detectors";
 import { METRIC_META } from "@/lib/analysis/types";
+import type { ReportFacts } from "@/lib/analysis/facts";
+import { NumberLedger } from "./ledger";
 
 /**
  * The AI analyst layer.
@@ -259,59 +261,13 @@ export function validateInsight(
     return { ok: false, reason: "no recommended actions" };
   }
 
-  // Build the set of numeric tokens the model is allowed to use: every
-  // evidence value in each of its plausible renderings, plus the percentages.
-  const allowed = new Set<string>();
-  const allow = (n: number) => {
-    for (const s of [
-      n.toFixed(0),
-      n.toFixed(1),
-      n.toFixed(2),
-      String(n),
-      Math.round(n).toLocaleString("en-US"),
-      (n * 100).toFixed(0),
-      (n * 100).toFixed(1),
-      (n * 100).toFixed(2),
-    ]) {
-      allowed.add(s.replace(/,/g, ""));
-    }
-  };
-  for (const e of finding.evidence) {
-    if (e.value !== null) allow(e.value);
-    if (e.comparison !== null && e.comparison !== undefined) allow(e.comparison);
-    if (e.changePct !== null && e.changePct !== undefined) {
-      allow(e.changePct);
-      allow(Math.abs(e.changePct));
-    }
-  }
-  allow(finding.severityScore);
-  for (const value of Object.values(finding.context)) {
-    if (typeof value === "number") allow(value);
-  }
-  // Small integers are almost always structural prose ("the next 7 days",
-  // "20-30%", "step 1"), not data claims. Allowing them avoids rejecting
-  // perfectly good advice.
-  for (let i = 0; i <= 100; i++) allowed.add(String(i));
-
-  const numbers = text.match(/\d[\d,]*\.?\d*/g) ?? [];
-  for (const raw of numbers) {
-    const cleaned = raw.replace(/,/g, "");
-    if (allowed.has(cleaned)) continue;
-    const asNumber = Number(cleaned);
-    if (!Number.isFinite(asNumber)) continue;
-    // Tolerate rounding differences against any allowed value.
-    const near = [...allowed].some((a) => {
-      const an = Number(a);
-      if (!Number.isFinite(an) || an === 0) return false;
-      return Math.abs(an - asNumber) / Math.abs(an) < 0.02;
-    });
-    if (!near) {
-      return { ok: false, reason: `cites unverifiable figure "${raw}"` };
-    }
+  const ledger = findingLedger(finding);
+  const unverified = ledger.unverified(text);
+  if (unverified.length > 0) {
+    return { ok: false, reason: `cites unverifiable figure "${unverified[0]}"` };
   }
 
-  // Guard against forbidden certainty about outcomes.
-  if (/\bwill (increase|improve|boost|double|guarantee|reduce your)\b/i.test(text)) {
+  if (promisesOutcome(text)) {
     return { ok: false, reason: "promises a guaranteed outcome" };
   }
 
@@ -319,7 +275,31 @@ export function validateInsight(
   return { ok: true };
 }
 
-function extractJson(text: string): unknown {
+/** Guard against forbidden certainty about outcomes. */
+export function promisesOutcome(text: string): boolean {
+  return /\b(will|guaranteed? to) (increase|improve|boost|double|guarantee|reduce your|lower your|fix)\b/i.test(text);
+}
+
+/** Every figure a finding legitimately carries. */
+export function findingLedger(finding: Finding, ledger = new NumberLedger()): NumberLedger {
+  for (const e of finding.evidence) {
+    ledger.add(e.value);
+    ledger.add(e.comparison);
+    ledger.add(e.changePct);
+  }
+  ledger.add(finding.severityScore);
+  for (const value of Object.values(finding.context)) {
+    if (typeof value === "number") ledger.add(value);
+  }
+  // Deterministic sentences AdMate already shows the user.
+  ledger.addText(finding.headline);
+  ledger.addText(finding.confidenceReason);
+  for (const t of [...finding.actions, ...finding.hypotheses, ...finding.monitor]) ledger.addText(t);
+  for (const d of finding.drivers ?? []) ledger.addAll([d.share, d.previousValue, d.currentValue, d.currentShare]);
+  return ledger;
+}
+
+export function extractJson(text: string): unknown {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
   const candidate = fenced ? fenced[1] : text;
   const start = candidate.indexOf("{");
@@ -333,6 +313,7 @@ export async function generateInsights(
   currency: string,
   context: AnalysisContext,
   accountSummary: string,
+  facts?: ReportFacts,
 ): Promise<InsightBundle> {
   const local = renderLocally(findings, currency, accountSummary);
   if (findings.length === 0) return local;
@@ -393,10 +374,24 @@ export async function generateInsights(
       };
     });
 
-    const summary =
-      typeof payload.executiveSummary === "string" && payload.executiveSummary.trim().length > 30
-        ? payload.executiveSummary.trim()
-        : accountSummary;
+    // The summary is the most-read text in the report, so it passes the same
+    // gate as every insight: only figures from the account totals, the
+    // findings, or AdMate's own deterministic sentences.
+    let summary = accountSummary;
+    if (typeof payload.executiveSummary === "string" && payload.executiveSummary.trim().length > 30) {
+      const candidateSummary = payload.executiveSummary.trim();
+      const ledger = new NumberLedger();
+      ledger.addText(context.accountTotals);
+      ledger.addText(accountSummary);
+      if (facts) {
+        ledger.addText(facts.briefing.verdict);
+        for (const w of facts.whatChanged) ledger.addAll([w.previousValue, w.currentValue, w.change, w.changePct]);
+      }
+      for (const f of narrated) findingLedger(f, ledger);
+      const unverified = ledger.unverified(candidateSummary);
+      if (unverified.length === 0 && !promisesOutcome(candidateSummary)) summary = candidateSummary;
+      else rejected.push(`executive summary: ${unverified.length ? `cites unverifiable figure "${unverified[0]}"` : "promises an outcome"}`);
+    }
 
     return {
       insights,

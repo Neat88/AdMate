@@ -162,6 +162,8 @@ const SYNONYMS: Record<ColumnKey, SynonymSpec> = {
       "cost conv",
       "value per conversion",
       "conversions rate",
+      "indicator",
+      "result type",
     ],
   },
   revenue: {
@@ -195,6 +197,57 @@ const SYNONYMS: Record<ColumnKey, SynonymSpec> = {
     ],
     contains: ["video view", "video play"],
     reject: ["video view rate", "cost per video view"],
+  },
+  leads: {
+    exact: [
+      "leads",
+      "lead",
+      "total leads",
+      "leads total",
+      "website leads",
+      "on facebook leads",
+      "meta leads",
+      "form submissions",
+      "lead form submissions",
+      "lead form completions",
+    ],
+    contains: ["leads", "lead form"],
+    reject: ["cost per lead", "lead rate", "leads value", "lead value", "cost per result"],
+  },
+  landingPageViews: {
+    exact: ["landing page views", "website landing page views", "landing page view", "lpv", "lpvs"],
+    contains: ["landing page view"],
+    reject: ["cost per landing page view", "cost per lpv"],
+  },
+  engagements: {
+    exact: ["post engagement", "post engagements", "engagements", "engagement", "total engagements"],
+    contains: ["engagement"],
+    reject: ["engagement rate", "cost per engagement", "cost per post engagement"],
+  },
+  thruplays: {
+    exact: [
+      "thruplays",
+      "thruplay",
+      "video thruplays",
+      "6 second video views",
+      "6s video views",
+      "video views 6s",
+      "focused views",
+    ],
+    contains: ["thruplay"],
+    reject: ["cost per thruplay"],
+  },
+  resultType: {
+    exact: [
+      "result indicator",
+      "results indicator",
+      "result type",
+      "objective",
+      "campaign objective",
+      "optimization goal",
+      "optimisation goal",
+    ],
+    contains: ["result indicator", "result type", "optimization goal"],
   },
 };
 

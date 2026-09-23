@@ -8,14 +8,8 @@ import {
   MAX_UPLOAD_BYTES,
 } from "@/lib/analysis/parse";
 import type { ColumnMapping } from "@/lib/analysis/columns";
-import { runAnalysis, serializeModel } from "@/lib/analysis/pipeline";
-import {
-  getWorkspace,
-  saveReport,
-  saveAnalysis,
-  listAlertRules,
-  saveAlertEvents,
-} from "@/lib/db/queries";
+import { analyzeAndSaveReport } from "@/lib/analysis/analyze-report";
+import { getWorkspace, saveReport } from "@/lib/db/queries";
 import type { Platform } from "@/lib/analysis/types";
 
 export const runtime = "nodejs";
@@ -102,29 +96,18 @@ export async function POST(request: Request) {
       rows: normalized.rows,
     });
 
-    const rules = listAlertRules(user.id, workspace.id);
-    const analysis = await runAnalysis({
+    const { analysisId, analysis } = await analyzeAndSaveReport({
+      userId: user.id,
+      reportId,
+      workspaceId: workspace.id,
       rows: normalized.rows,
       platform: context.platform as Platform,
       currency: context.currency,
       objective: context.objective ?? null,
       periodStart,
       periodEnd,
-      alertRules: rules,
+      issues: normalized.issues,
     });
-
-    const analysisId = saveAnalysis({
-      userId: user.id,
-      reportId,
-      engine: analysis.insights.engine,
-      fallbackReason: analysis.insights.fallbackReason,
-      summary: analysis.insights.executiveSummary,
-      modelJson: serializeModel(analysis.model),
-      findings: analysis.findings,
-      insights: analysis.insights.insights,
-    });
-
-    saveAlertEvents(user.id, analysisId, reportId, analysis.alertEvents);
 
     return NextResponse.json({
       ok: true,
