@@ -4,7 +4,8 @@ import { getMetric, type PerformanceModel } from "./metrics";
 import type { Finding } from "./detectors";
 import { fmtMoney, fmtPct, fmtShare, fmtValue } from "./detectors";
 import { buildDiagnoses, type Diagnosis, type Tier } from "./diagnoses";
-import { analyzeDrivers, mainDrivers, type DriverAnalysis } from "./drivers";
+import { analyzeDrivers, groupEntity, mainDrivers, type DriverAnalysis } from "./drivers";
+import { deriveMetrics } from "./metrics";
 import {
   OBJECTIVE_PROFILES,
   metricLabel,
@@ -69,6 +70,24 @@ function whatChangedMetrics(objective: Objective | "mixed", model: PerformanceMo
   if (objective === "sales") out.push("roas");
   for (const m of ["ctr", "cpc", "cpm"] as MetricKey[]) if (profile.keyMetrics.includes(m) || m === "cpm") out.push(m);
   return [...new Set(out)];
+}
+
+function dominantGroup(
+  model: PerformanceModel,
+  objectives: Record<string, ObjectiveResolution>,
+): { objective: Objective; entity: ReturnType<typeof groupEntity>; members: PerformanceModel["campaigns"] } | null {
+  const spendBy = new Map<Objective, number>();
+  for (const c of model.campaigns) {
+    const o = objectives[c.name]?.objective;
+    if (o) spendBy.set(o, (spendBy.get(o) ?? 0) + (getMetric(c.metrics, "spend") ?? 0));
+  }
+  const top = [...spendBy.entries()].sort((a, b) => b[1] - a[1])[0];
+  if (!top) return null;
+  const members = model.campaigns.filter((c) => objectives[c.name]?.objective === top[0]);
+  if (members.length < 2) return null;
+  const entity = groupEntity(`objective:${top[0]}`, `${OBJECTIVE_PROFILES[top[0]].label} campaigns`, members);
+  entity.metrics.derived = deriveMetrics(entity.metrics.base);
+  return { objective: top[0], entity, members };
 }
 
 function item(d: Diagnosis | undefined): BriefingItem | null {
@@ -136,8 +155,9 @@ function buildVerdict(
     const fmt = METRIC_META[headline.metric].format;
     const drivers = mainDrivers(headline);
     const by = drivers.length > 0 ? `, driven mainly by "${drivers[0].name}"` : "";
+    const scope = headline.parentId.startsWith("objective:") ? `Across ${headline.parentName.toLowerCase()}, ` : "";
     parts.push(
-      `${label} ${headline.change > 0 ? "rose" : "fell"} ${fmtPct(Math.abs(headline.changePct ?? 0)).replace("+", "")} (${fmtValue(headline.previousValue, fmt, currency)} → ${fmtValue(headline.currentValue, fmt, currency)})${by}.`,
+      `${scope}${label} ${headline.change > 0 ? "rose" : "fell"} ${fmtPct(Math.abs(headline.changePct ?? 0)).replace("+", "")} (${fmtValue(headline.previousValue, fmt, currency)} → ${fmtValue(headline.currentValue, fmt, currency)})${by}.`,
     );
   } else if (whatChanged.length > 0) {
     parts.push("Headline efficiency was broadly stable between the two halves of the report.");
@@ -169,6 +189,18 @@ export function buildFacts(input: {
 
   const whatChanged: DriverAnalysis[] = [];
   if (model.account.periodComparison) {
+    if (accountObjective === "mixed") {
+      // Judge cost per result only across the campaigns that share the
+      // dominant objective; delivery metrics can still be read account-wide.
+      const group = dominantGroup(model, objectives);
+      if (group) {
+        const primary = primaryCostMetric(group.entity, group.objective);
+        if (primary) {
+          const analysis = analyzeDrivers(model, group.entity, primary.cost, group.members);
+          if (analysis) whatChanged.push(analysis);
+        }
+      }
+    }
     for (const metric of whatChangedMetrics(accountObjective, model)) {
       const analysis = analyzeDrivers(model, model.account, metric);
       if (analysis) whatChanged.push(analysis);
@@ -209,7 +241,8 @@ export function describeChange(analysis: DriverAnalysis, objective: Objective | 
   const fmt = METRIC_META[analysis.metric].format;
   const dir = analysis.change > 0 ? "rose" : analysis.change < 0 ? "fell" : "was unchanged";
   const pct = analysis.changePct !== null ? ` (${fmtPct(analysis.changePct)})` : "";
-  let sentence = `${label} ${dir} from ${fmtValue(analysis.previousValue, fmt, currency)} to ${fmtValue(analysis.currentValue, fmt, currency)}${pct}.`;
+  const scope = analysis.parentId.startsWith("objective:") ? `Across ${analysis.parentName.toLowerCase()}, ` : "";
+  let sentence = `${scope}${label} ${dir} from ${fmtValue(analysis.previousValue, fmt, currency)} to ${fmtValue(analysis.currentValue, fmt, currency)}${pct}.`;
   const drivers = mainDrivers(analysis);
   if (drivers.length > 0 && analysis.changePct !== null && Math.abs(analysis.changePct) >= 0.05) {
     const d = drivers[0];

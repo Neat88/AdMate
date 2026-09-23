@@ -441,7 +441,7 @@ const spendWithoutConversions: Detector = (entity, ctx) => {
  * How to test a movement statistically: which counts the metric is built
  * from. `direction` is the direction of the *metric* move being tested.
  */
-function movementSignificance(
+export function movementSignificance(
   metric: MetricKey,
   comparison: NonNullable<EntityPerformance["periodComparison"]>,
   bad: boolean,

@@ -277,7 +277,7 @@ export function validateInsight(
 
 /** Guard against forbidden certainty about outcomes. */
 export function promisesOutcome(text: string): boolean {
-  return /\b(will|guaranteed? to) (increase|improve|boost|double|guarantee|reduce your|lower your|fix)\b/i.test(text);
+  return /\b(will|guaranteed? to) (definitely )?(increase|improve|boost|double|guarantee|reduce|lower|fix|fall|drop|rise|recover|go (up|down))\b/i.test(text);
 }
 
 /** Every figure a finding legitimately carries. */

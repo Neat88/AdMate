@@ -113,6 +113,7 @@ export function analyzeDrivers(
   model: PerformanceModel,
   parent: EntityPerformance,
   metric: MetricKey,
+  explicitChildren?: EntityPerformance[],
 ): DriverAnalysis | null {
   const def = RATIO_DEFINITIONS[metric];
   const comparison = parent.periodComparison;
@@ -128,7 +129,7 @@ export function analyzeDrivers(
   const R2 = N2 / D2;
   const change = (R2 - R) * def.scale;
 
-  const children = childrenOf(model, parent);
+  const children = explicitChildren ?? childrenOf(model, parent);
   if (children.length < 2) return null;
 
   const contributions: DriverContribution[] = [];
@@ -221,4 +222,47 @@ export function driverKind(c: DriverContribution): "rate" | "mix" | "new" {
 /** Metric value for display, falling back to the aggregate when there is no comparison. */
 export function currentMetric(entity: EntityPerformance, metric: MetricKey): number | null {
   return entity.periodComparison?.deltas[metric]?.current ?? getMetric(entity.metrics, metric);
+}
+
+/**
+ * A synthetic parent covering only some campaigns - used for mixed-objective
+ * accounts, where "account CPA" would divide sales-campaign spend plus
+ * awareness spend by sales conversions and mean nothing.
+ */
+export function groupEntity(id: string, name: string, members: EntityPerformance[]): EntityPerformance {
+  const sum = (pick: (e: EntityPerformance) => Partial<Record<BaseMetric, number | null>>) => {
+    const out: Partial<Record<BaseMetric, number | null>> = {};
+    for (const e of members) {
+      for (const [k, v] of Object.entries(pick(e)) as [BaseMetric, number | null][]) {
+        if (k === "frequency" || v === null || v === undefined) continue;
+        out[k] = (out[k] ?? 0) + v;
+      }
+    }
+    return out;
+  };
+  const base = sum((e) => e.metrics.base);
+  const withComparison = members.filter((m) => m.periodComparison);
+  const first = withComparison[0]?.periodComparison;
+  let periodComparison: PeriodComparison | undefined;
+  if (first) {
+    const prev = sum((e) => Object.fromEntries(Object.entries(e.periodComparison?.deltas ?? {}).map(([k, d]) => [k, d?.previous ?? null])));
+    const curr = sum((e) => Object.fromEntries(Object.entries(e.periodComparison?.deltas ?? {}).map(([k, d]) => [k, d?.current ?? null])));
+    const deltas: PeriodComparison["deltas"] = {};
+    for (const k of new Set([...Object.keys(prev), ...Object.keys(curr)]) as Set<BaseMetric>) {
+      const p = prev[k] ?? null;
+      const c = curr[k] ?? null;
+      deltas[k] = { metric: k, previous: p, current: c, absoluteChange: p !== null && c !== null ? c - p : null, changePct: p && c !== null ? (c - p) / Math.abs(p) : null };
+    }
+    periodComparison = { ...first, deltas };
+  }
+  return {
+    id,
+    level: "account",
+    name,
+    campaign: null,
+    adset: null,
+    rowCount: members.reduce((n, m) => n + m.rowCount, 0),
+    metrics: { base, derived: {} },
+    periodComparison,
+  };
 }

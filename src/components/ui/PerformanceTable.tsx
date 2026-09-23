@@ -6,6 +6,13 @@ import { METRIC_META } from "@/lib/analysis/types";
 import { getMetric } from "@/lib/analysis/metrics";
 import { formatMetric, changeIsGood } from "@/lib/format";
 import { DeltaChip } from "./primitives";
+import type { Objective, ObjectiveResolution } from "@/lib/analysis/objectives";
+import { metricLabel, objectiveForEntity, objectiveLabel, primaryCostMetric } from "@/lib/analysis/objectives";
+import type { Tier } from "@/lib/analysis/diagnoses";
+import { TIER_STYLE } from "@/components/report/tiers";
+import { AskButton } from "@/components/assistant/AskButton";
+
+import { healthKey } from "@/components/report/health";
 
 /**
  * Sortable, filterable entity table.
@@ -19,12 +26,20 @@ export function PerformanceTable({
   availableMetrics,
   showComparison,
   levelLabel,
+  objectives,
+  accountObjective,
+  health,
 }: {
   entities: EntityPerformance[];
   currency: string;
   availableMetrics: MetricKey[];
   showComparison: boolean;
   levelLabel: string;
+  /** When present, rows show their objective and an objective-aware "main KPI" column. */
+  objectives?: Record<string, ObjectiveResolution>;
+  accountObjective?: Objective | "mixed";
+  /** Worst diagnosis tier per entity, keyed by healthKey(). */
+  health?: Record<string, Tier>;
 }) {
   const [sortKey, setSortKey] = useState<MetricKey | "name">("spend");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -32,7 +47,23 @@ export function PerformanceTable({
 
   const columns = useMemo(
     () =>
-      (["spend", "impressions", "clicks", "ctr", "cpc", "cpm", "conversions", "cpa", "revenue", "roas", "frequency"] as MetricKey[]).filter(
+      ([
+        "spend",
+        "impressions",
+        "clicks",
+        "ctr",
+        "cpc",
+        "cpm",
+        "conversions",
+        "cpa",
+        "revenue",
+        "roas",
+        "leads",
+        "cpl",
+        "landingPageViews",
+        "costPerLpv",
+        "frequency",
+      ] as MetricKey[]).filter(
         (m) => availableMetrics.includes(m),
       ),
     [availableMetrics],
@@ -92,7 +123,8 @@ export function PerformanceTable({
         </p>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* relative: absolutely-positioned descendants (sr-only caption, popovers) must be clipped by this scroller, not widen the page */}
+      <div className="relative overflow-x-auto">
         <table className="w-full min-w-[640px] border-t border-ink-200 text-sm">
           <caption className="sr-only">
             {levelLabel} performance, sortable by any metric column
@@ -107,6 +139,11 @@ export function PerformanceTable({
                 align="left"
                 sticky
               />
+              {objectives ? (
+                <th scope="col" className="whitespace-nowrap px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-ink-600">
+                  Main KPI
+                </th>
+              ) : null}
               {columns.map((m) => (
                 <SortHeader
                   key={m}
@@ -134,7 +171,22 @@ export function PerformanceTable({
                       {entity.campaign}
                     </span>
                   ) : null}
+                  {objectives ? (
+                    <span className="mt-1 flex flex-wrap items-center gap-1">
+                      <ObjectiveTag entity={entity} objectives={objectives} accountObjective={accountObjective ?? "mixed"} />
+                      <HealthTag tier={health?.[healthKey(entity.level, entity.campaign, entity.adset, entity.name)]} />
+                      <AskButton focus={{ kind: "entity", entityId: entity.id }} variant="icon" />
+                    </span>
+                  ) : null}
                 </th>
+                {objectives ? (
+                  <MainKpiCell
+                    entity={entity}
+                    objective={objectiveForEntity(entity, objectives, accountObjective ?? "mixed")}
+                    currency={currency}
+                    showComparison={showComparison}
+                  />
+                ) : null}
                 {columns.map((m) => {
                   const value = getMetric(entity.metrics, m);
                   const delta = showComparison ? entity.periodComparison?.deltas[m] : undefined;
@@ -165,6 +217,65 @@ export function PerformanceTable({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function ObjectiveTag({
+  entity,
+  objectives,
+  accountObjective,
+}: {
+  entity: EntityPerformance;
+  objectives: Record<string, ObjectiveResolution>;
+  accountObjective: Objective | "mixed";
+}) {
+  const objective = objectiveForEntity(entity, objectives, accountObjective);
+  const campaignName = entity.level === "campaign" ? entity.name : entity.campaign;
+  const source = campaignName ? objectives[campaignName] : undefined;
+  return (
+    <span
+      className="rounded border border-ink-200 bg-ink-50 px-1.5 py-px text-[10px] font-medium text-ink-600"
+      title={source ? `Objective inferred from ${source.detail}` : undefined}
+    >
+      {objectiveLabel(objective)}
+    </span>
+  );
+}
+
+function HealthTag({ tier }: { tier: Tier | undefined }) {
+  if (!tier) return null;
+  const style = TIER_STYLE[tier];
+  return (
+    <span className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-[10px] font-medium ${style.chip}`}>
+      <span aria-hidden="true">{style.glyph}</span>
+      {style.label}
+    </span>
+  );
+}
+
+function MainKpiCell({
+  entity,
+  objective,
+  currency,
+  showComparison,
+}: {
+  entity: EntityPerformance;
+  objective: Objective | "mixed";
+  currency: string;
+  showComparison: boolean;
+}) {
+  const primary = primaryCostMetric(entity, objective);
+  if (!primary) return <td className="px-4 py-2.5 text-right text-ink-300">—</td>;
+  const value = getMetric(entity.metrics, primary.cost);
+  const delta = showComparison ? entity.periodComparison?.deltas[primary.cost] : undefined;
+  return (
+    <td className="px-4 py-2.5 text-right tnum">
+      <span className="block text-[10px] uppercase tracking-wide text-ink-500">{metricLabel(primary.cost, objective)}</span>
+      <span className="font-semibold text-ink-900">{formatMetric(value, primary.cost, currency)}</span>
+      {delta?.changePct != null ? (
+        <DeltaChip change={delta.changePct} isGood={changeIsGood(primary.cost, delta.changePct)} className="ml-1.5" />
+      ) : null}
+    </td>
   );
 }
 

@@ -98,6 +98,8 @@ over plain HTTP** — you need HTTPS.
 | `ADMATE_DB_PATH` | Yes on a container host | `./data/admate.db` | Must point **inside the mounted volume**, or data is lost on redeploy |
 | `ANTHROPIC_API_KEY` | No | unset | Enables Claude-written narratives |
 | `ADMATE_MODEL` | No | `claude-sonnet-5` | Model used for narration |
+| `ADMATE_CHAT_MODEL` | No | `ADMATE_MODEL` | Model used by the in-report assistant |
+| `ADMATE_AI_DAILY_LIMIT` | No | `60` | Model-backed assistant answers per user per day |
 | `PORT` | No | `3000` | Most hosts set this for you |
 
 ---

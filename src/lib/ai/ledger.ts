@@ -38,13 +38,19 @@ export class NumberLedger {
     for (const token of scanNumbers(text)) this.values.push(token.value);
   }
 
-  has(value: number): boolean {
+  /**
+   * A figure matches when it is a ledger value rounded to the precision it
+   * was written at ("$10.77" -> "$10.8" or "$11"), or within 0.5% of one.
+   * The tolerance is kept tight on purpose: a context pack holds hundreds of
+   * numbers, and a loose tolerance lets an invented figure match one by luck.
+   */
+  has(value: number, decimals = decimalsOf(value)): boolean {
+    const factor = 10 ** decimals;
     for (const a of this.values) {
       if (a === value) return true;
       if (a === 0) continue;
-      if (Math.abs(a - value) / Math.abs(a) < 0.02) return true;
-      // Rounded to a whole number ("$10.77" written as "$11").
-      if (Number.isInteger(value) && Math.abs(a) >= 1 && Math.round(a) === value) return true;
+      if (Math.round(a * factor) / factor === value) return true;
+      if (Math.abs(a - value) / Math.abs(a) < 0.005) return true;
     }
     return false;
   }
@@ -53,7 +59,7 @@ export class NumberLedger {
   unverified(text: string): string[] {
     const bad: string[] = [];
     for (const token of scanNumbers(text)) {
-      if (this.has(token.value)) continue;
+      if (this.has(token.value, token.decimals)) continue;
       if (!token.currency && !token.percent && Number.isInteger(token.value) && token.value <= 31) continue;
       if (token.percent && GUIDANCE_PERCENTS.has(token.value)) continue;
       bad.push(token.raw);
@@ -66,9 +72,16 @@ export class NumberLedger {
   }
 }
 
+function decimalsOf(n: number): number {
+  const s = String(n);
+  const i = s.indexOf(".");
+  return i === -1 ? 0 : s.length - i - 1;
+}
+
 interface NumberToken {
   raw: string;
   value: number;
+  decimals: number;
   currency: boolean;
   percent: boolean;
 }
@@ -85,9 +98,11 @@ export function scanNumbers(text: string): NumberToken[] {
     const raw = m[0].trim();
     const value = Number(m[2].replace(/,/g, ""));
     if (!Number.isFinite(value)) continue;
+    const fraction = m[2].split(".")[1];
     out.push({
       raw,
       value,
+      decimals: fraction ? fraction.length : 0,
       currency: Boolean(m[1]),
       percent: Boolean(m[3] && m[3].includes("%")),
     });
