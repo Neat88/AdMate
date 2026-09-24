@@ -6,6 +6,8 @@ import type { PerformanceModel } from "@/lib/analysis/metrics";
 import { Card, CardHeader } from "@/components/ui/primitives";
 import { PerformanceTable } from "@/components/ui/PerformanceTable";
 import { TrendChart } from "@/components/ui/TrendChart";
+import type { Objective, ObjectiveResolution } from "@/lib/analysis/objectives";
+import type { Tier } from "@/lib/analysis/diagnoses";
 
 const LEVEL_LABELS: Record<EntityLevel, string> = {
   account: "Account",
@@ -26,11 +28,19 @@ export function AnalysisTabs({
   currency,
   availableMetrics,
   accountTrend,
+  objectives,
+  accountObjective,
+  health,
+  reportId,
 }: {
   model: PerformanceModel;
   currency: string;
   availableMetrics: MetricKey[];
   accountTrend: TrendPoint[];
+  objectives?: Record<string, ObjectiveResolution>;
+  accountObjective?: Objective | "mixed";
+  health?: Record<string, Tier>;
+  reportId?: string;
 }) {
   const levels = model.levelsPresent.filter((l) => l !== "account");
   const [level, setLevel] = useState<EntityLevel>(levels[0] ?? "account");
@@ -86,11 +96,16 @@ export function AnalysisTabs({
           }
         />
         <PerformanceTable
+          key={level}
           entities={entities}
           currency={currency}
           availableMetrics={availableMetrics}
           showComparison={model.hasDates}
           levelLabel={LEVEL_LABELS[level]}
+          objectives={objectives}
+          accountObjective={accountObjective}
+          health={health}
+          reportId={reportId}
         />
       </Card>
     </div>

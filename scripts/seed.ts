@@ -6,10 +6,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb } from "../src/lib/db/schema";
 import { hashPassword, newId } from "../src/lib/db/auth";
-import { createWorkspace, saveReport, saveAnalysis, listAlertRules, saveAlertEvents } from "../src/lib/db/queries";
+import { createWorkspace, saveReport } from "../src/lib/db/queries";
 import { parseCsv, normalizeRows } from "../src/lib/analysis/parse";
 import { mapColumns, detectPlatform } from "../src/lib/analysis/columns";
-import { runAnalysis, serializeModel } from "../src/lib/analysis/pipeline";
+import { analyzeAndSaveReport } from "../src/lib/analysis/analyze-report";
 
 const DEMO_EMAIL = "demo@admate.app";
 const DEMO_PASSWORD = "admate-demo-2026";
@@ -70,28 +70,18 @@ async function main() {
       rows: normalized.rows,
     });
 
-    const rules = listAlertRules(userId, workspaceId);
-    const analysis = await runAnalysis({
+    const { analysis } = await analyzeAndSaveReport({
+      userId,
+      reportId,
+      workspaceId,
       rows: normalized.rows,
       platform,
       currency: seed.currency,
       objective: seed.objective,
       periodStart: normalized.dateRange?.start ?? null,
       periodEnd: normalized.dateRange?.end ?? null,
-      alertRules: rules,
+      issues: normalized.issues,
     });
-
-    const analysisId = saveAnalysis({
-      userId,
-      reportId,
-      engine: analysis.insights.engine,
-      fallbackReason: analysis.insights.fallbackReason,
-      summary: analysis.insights.executiveSummary,
-      modelJson: serializeModel(analysis.model),
-      findings: analysis.findings,
-      insights: analysis.insights.insights,
-    });
-    saveAlertEvents(userId, analysisId, reportId, analysis.alertEvents);
 
     console.log(
       `seeded ${seed.file} -> ${seed.workspace}: ${analysis.findings.length} findings, ${analysis.alertEvents.length} alerts (${analysis.insights.engine} engine)`,

@@ -53,7 +53,7 @@ built-in default and will return a clear 503 from the auth routes rather than st
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | Runs the analysis-engine and AI-validation test suites (40 tests) |
+| `npm test` | Runs the analysis-engine, assistant, feature and AI-validation test suites (64 tests) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run build` | Production build |
 | `npm run db:reset` | Deletes the database and re-seeds |
@@ -88,6 +88,78 @@ This section is deliberately precise. Nothing below is overstated.
 - **Custom alert rules** — metric, condition, threshold, scope, name filter; evaluated on analysis.
 - **Client report** — a print/PDF-ready summary at `/reports/[id]/share`.
 - **Sample data** — four reports with known planted problems, loadable from the upload page.
+
+### The report: what, why, now what
+
+Each report opens on a **briefing** - one sentence on what happened, the biggest problem,
+biggest improvement, best opportunity and how far to trust the data - followed by:
+
+- **What to do** - one card per problem, grouped into *Critical*, *Needs attention*,
+  *Monitor* and *Performing well*. Each card names one action from a fixed vocabulary
+  (check tracking, reduce or pause, refresh creative, adjust audience, check the landing
+  page, rebalance budget, investigate, scale gradually, wait for data, keep running),
+  the alternatives if that action isn't an option, and when to look again.
+- **Why am I seeing this?** - every gate the finding passed (objective, size of change,
+  spend at stake, statistical test), with the observed value and the rule.
+- **What changed** - each headline metric's change split *exactly* into the campaigns,
+  ad sets or ads that caused it, and whether each one got worse itself or took more budget.
+- **Ask AdMate** - an assistant attached to the report. "Ask" buttons on every KPI, card,
+  table row and driver open it with that context already selected, so "should I pause
+  it?" needs no explanation of what "it" is.
+
+### How the engine decides (v2)
+
+- **Objectives per campaign.** Resolved from a result-type column, then the campaign name
+  ("LEADS", "Traffic", "Brand Awareness"...), then the objective chosen at upload, then the
+  data. The source is always shown. Campaigns are judged only on their objective's metrics
+  and compared only with campaigns sharing that objective - an awareness campaign with
+  zero conversions is not "wasting budget".
+- **Statistical checks.** Period changes use an exact conditional binomial test on the
+  underlying counts; zero-conversion calls use the account's own conversion rate to ask
+  whether zero is surprising. Signals that clear the percentage threshold but not the
+  test become **Monitor** items that say how much more data would settle them.
+- **Diagnoses, not signal lists.** Several signals on one entity (CPA up, CTR down,
+  frequency 4.6) become one card ("Creative fatigue likely") with one action. "Pause"
+  requires strong evidence; a possible tracking fault always comes first.
+
+### The assistant
+
+- The model never sees the whole report. For each question AdMate resolves which
+  entities and metrics are in play (the clicked element, names and metric words in the
+  question, the conversation's last focus) and sends a compact context pack, plus
+  read-only tools to look up an entity, break a change down, read a daily trend or
+  compare entities - all scoped server-side to the one report the user owns.
+- Answers come back as *what happened / the numbers / what it likely means / what to
+  consider / confidence & limits*, and are validated before display: every figure must
+  be in the data provided, every quoted name must exist in the report, and promised
+  outcomes are rejected. A failing answer gets one corrective retry, then the built-in
+  analyst answers instead. Answers are sent whole (not streamed token by token) so an
+  unvalidated number is never on screen; progress is streamed instead.
+- Without an API key, suggested questions are answered by the built-in analyst and
+  free-text input is disabled. With a key, there is a per-user daily limit
+  (`ADMATE_AI_DAILY_LIMIT`) and a per-minute rate limit.
+- Conversations are stored per report and deleted with it.
+
+Reports analysed before v2 show an "analysed with an earlier version" banner with a
+**Re-analyse** button that re-runs the engine on the stored rows (no re-upload needed).
+Recommendation statuses and notes carry over to the new analysis.
+
+### Working across uploads
+
+- **Correct an objective.** Each campaign row in the breakdown table has an objective
+  selector. Choosing one re-analyses the report with it ("your correction" wins over any
+  detection); "auto" returns to AdMate's own detection.
+- **Compared with your previous upload.** When the same workspace has an earlier upload
+  for the same platform and currency, the report compares against it: account KPIs,
+  each campaign's main KPI (with the same statistical test the detectors use), and
+  campaigns that are new or gone. Totals are compared per day when the two files cover
+  different numbers of days; mixed-objective accounts are compared per objective. The
+  assistant can answer "how does this compare with my last upload?".
+- **Side by side.** Tick 2-4 rows in the breakdown table to compare them; the best value
+  per metric is marked, and mixing objectives is flagged as not like-for-like.
+- **Pin to client report.** Any assistant answer can be pinned to the printable client
+  report. Pins are created from the stored, validated answer - never from text sent by
+  the browser - and can be removed from the client report page.
 
 ### Functional, but improved by an API key
 
@@ -280,7 +352,7 @@ being exact — they informed which *problems* to solve, not what to copy.
 npm test
 ```
 
-40 tests, no network required:
+64 tests, no network required:
 
 - **Value coercion** — zero vs missing, currency symbols, `1,234.56` vs `1.234,56`, parenthesised
   negatives, percentages, Excel serial dates, ambiguous `dd/mm` vs `mm/dd`.
@@ -291,7 +363,15 @@ npm test
 - **Metrics** — derived metrics omitted when inputs are missing, `null` on divide-by-zero, frequency
   recomputed rather than summed, blended CPA from summed inputs rather than averaged ratios, period
   comparison refuses fewer than four days, robust z-score stays silent on small or flat samples.
-- **Detectors** — each planted scenario in the Meta sample is found; every finding carries evidence,
+- **Objectives, statistics and drivers** — objectives inferred per campaign; a traffic
+  campaign is never judged on CPA; a 3 → 1 conversion "spike" is never strong evidence;
+  small zero-conversion ads become "wait for data"; driver contributions sum exactly to
+  the change; the retargeting signals merge into one fatigue diagnosis.
+- **Assistant** — context resolution from clicks, names and conversation; invented
+  figures, unknown names and promised outcomes are caught; the model path retries once
+  and falls back (tested with a fake client); every suggested question has a no-key answer.
+- **Detectors** — each planted scenario in the Meta sample is found (the zero-conversion
+  campaign is an awareness campaign and is correctly *not* flagged for conversions); every finding carries evidence,
   actions, monitoring and causes; no CPA/ROAS findings on a report without conversion tracking;
   an empty report produces no findings rather than throwing.
 - **Alerts** — rules fire, disabled rules never fire, change-based rules stay silent without dates.

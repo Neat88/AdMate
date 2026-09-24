@@ -2,6 +2,9 @@ import { buildPerformanceModel, getMetric } from "./metrics";
 import { detectFindings } from "./detectors";
 import { evaluateAlerts } from "./alerts";
 import { buildAccountSummary, buildAnalysisContext } from "./summary";
+import { accountObjective as resolveAccountObjective, resolveCampaignObjectives, type Objective } from "./objectives";
+import { buildFacts, type ReportFacts } from "./facts";
+import type { DataIssue } from "./parse";
 import { generateInsights, type InsightBundle } from "@/lib/ai/insights";
 import type { NormalizedRow, Platform, MetricKey } from "./types";
 import { BASE_METRICS } from "./types";
@@ -26,6 +29,10 @@ export interface AnalysisInput {
   periodStart: string | null;
   periodEnd: string | null;
   alertRules: AlertRule[];
+  /** Data-quality issues from parsing, used to judge how far to trust the report. */
+  issues?: DataIssue[];
+  /** Per-campaign objective corrections made by the user. */
+  objectiveOverrides?: Record<string, Objective>;
 }
 
 export interface AnalysisOutput {
@@ -35,12 +42,23 @@ export interface AnalysisOutput {
   alertEvents: AlertEvent[];
   summary: string;
   availableMetrics: MetricKey[];
+  facts: ReportFacts;
 }
 
 export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutput> {
   const model = buildPerformanceModel(input.rows);
 
-  const { findings } = detectFindings(model, input.currency);
+  const objectives = resolveCampaignObjectives(model, input.rows, input.objective, input.objectiveOverrides);
+  const accountObjective = resolveAccountObjective(model, objectives, input.objective);
+  const { findings } = detectFindings(model, input.currency, { objectives, accountObjective });
+  const facts = buildFacts({
+    model,
+    findings,
+    objectives,
+    accountObjective,
+    issues: input.issues ?? [],
+    currency: input.currency,
+  });
 
   const availableMetrics = BASE_METRICS.filter((m) =>
     input.rows.some((r) => typeof r.metrics[m] === "number"),
@@ -62,10 +80,10 @@ export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutput>
     availableMetrics,
   );
 
-  const insights = await generateInsights(findings, input.currency, context, summary);
+  const insights = await generateInsights(findings, input.currency, context, summary, facts);
   const alertEvents = evaluateAlerts(input.alertRules, model, input.currency);
 
-  return { model, findings, insights, alertEvents, summary, availableMetrics };
+  return { model, findings, insights, alertEvents, summary, availableMetrics, facts };
 }
 
 /**
@@ -83,6 +101,7 @@ export function serializeModel(model: PerformanceModel): string {
     ads: model.ads.map(stripTrend),
     levelsPresent: model.levelsPresent,
     hasDates: model.hasDates,
+    split: model.split ?? null,
   });
 }
 

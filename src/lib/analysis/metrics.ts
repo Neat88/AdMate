@@ -72,6 +72,10 @@ export function deriveMetrics(base: Partial<Record<BaseMetric, number | null>>):
   const spend = get("spend");
   const conversions = get("conversions");
   const revenue = get("revenue");
+  const leads = get("leads");
+  const lpv = get("landingPageViews");
+  const engagements = get("engagements");
+  const thruplays = get("thruplays");
 
   const derived: Partial<Record<DerivedMetric, number | null>> = {};
   const set = (k: DerivedMetric, v: number | null) => {
@@ -85,6 +89,12 @@ export function deriveMetrics(base: Partial<Record<BaseMetric, number | null>>):
   set("roas", safeDivide(revenue, spend));
   set("cvr", safeDivide(conversions, clicks));
   set("aov", safeDivide(revenue, conversions));
+  set("cpl", safeDivide(spend, leads));
+  set("leadRate", safeDivide(leads, clicks));
+  set("costPerLpv", safeDivide(spend, lpv));
+  set("cpe", safeDivide(spend, engagements));
+  set("engagementRate", safeDivide(engagements, impressions));
+  set("costPerThruplay", safeDivide(spend, thruplays));
 
   return derived;
 }
@@ -144,24 +154,50 @@ export function buildTrend(rows: NormalizedRow[]): TrendPoint[] {
     .map(([date, dateRows]) => ({ date, metrics: aggregate(dateRows) }));
 }
 
+/** The two halves of the reporting window used for every period comparison. */
+export interface PeriodSplit {
+  previousDays: string[];
+  currentDays: string[];
+  /** A middle day left out so both halves have the same number of days. */
+  excludedDay: string | null;
+}
+
 /**
- * Splits the reporting window into two equal halves and compares them.
- *
- * Returns null when there are fewer than 4 distinct days - with less data the
- * "change" is noise, and reporting it as a trend would be misleading.
+ * Splits the reporting window into two equal halves. Returns null when there
+ * are fewer than 4 distinct days - with less data the "change" is noise, and
+ * reporting it as a trend would be misleading.
  */
-export function comparePeriods(rows: NormalizedRow[]): PeriodComparison | null {
-  const dated = rows.filter((r) => r.date !== null);
-  const days = [...new Set(dated.map((r) => r.date as string))].sort();
+export function splitPeriods(rows: NormalizedRow[]): PeriodSplit | null {
+  const days = [...new Set(rows.filter((r) => r.date !== null).map((r) => r.date as string))].sort();
   if (days.length < 4) return null;
-
   const half = Math.floor(days.length / 2);
-  const previousDays = new Set(days.slice(0, half));
-  const currentDays = new Set(days.slice(days.length - half));
+  return {
+    previousDays: days.slice(0, half),
+    currentDays: days.slice(days.length - half),
+    excludedDay: days.length % 2 === 1 ? days[half] : null,
+  };
+}
 
+/**
+ * Compares the two halves of the reporting window.
+ *
+ * Pass the account-level `split` when comparing an entity: every campaign, ad
+ * set and ad must be compared over the *same* dates as the account, otherwise
+ * an ad launched mid-report gets its own private "halves" and its change
+ * cannot be added up against anything else.
+ */
+export function comparePeriods(rows: NormalizedRow[], split?: PeriodSplit | null): PeriodComparison | null {
+  const s = split === undefined ? splitPeriods(rows) : split;
+  if (!s) return null;
+
+  const previousDays = new Set(s.previousDays);
+  const currentDays = new Set(s.currentDays);
+  const dated = rows.filter((r) => r.date !== null);
   const previousRows = dated.filter((r) => previousDays.has(r.date as string));
   const currentRows = dated.filter((r) => currentDays.has(r.date as string));
-  if (previousRows.length === 0 || currentRows.length === 0) return null;
+  // One empty half is still a comparison (an ad launched or paused mid-report);
+  // its missing side reads as "not reported" rather than as zero.
+  if (previousRows.length === 0 && currentRows.length === 0) return null;
 
   const current = aggregate(currentRows);
   const previous = aggregate(previousRows);
@@ -181,18 +217,17 @@ export function comparePeriods(rows: NormalizedRow[]): PeriodComparison | null {
     };
   }
 
-  const prevSorted = [...previousDays].sort();
-  const currSorted = [...currentDays].sort();
-
+  const half = s.currentDays.length;
   return {
     currentLabel: `Last ${half} day${half === 1 ? "" : "s"}`,
     previousLabel: `Prior ${half} day${half === 1 ? "" : "s"}`,
-    previousStart: prevSorted[0],
-    previousEnd: prevSorted[prevSorted.length - 1],
-    currentStart: currSorted[0],
-    currentEnd: currSorted[currSorted.length - 1],
-    currentDays: currSorted.length,
-    previousDays: prevSorted.length,
+    previousStart: s.previousDays[0],
+    previousEnd: s.previousDays[s.previousDays.length - 1],
+    currentStart: s.currentDays[0],
+    currentEnd: s.currentDays[s.currentDays.length - 1],
+    currentDays: s.currentDays.length,
+    previousDays: s.previousDays.length,
+    excludedDay: s.excludedDay,
     deltas,
   };
 }
@@ -204,9 +239,16 @@ export interface PerformanceModel {
   ads: EntityPerformance[];
   levelsPresent: EntityLevel[];
   hasDates: boolean;
+  /** The date split every period comparison in this model uses. */
+  split?: PeriodSplit | null;
 }
 
-function buildLevel(rows: NormalizedRow[], level: EntityLevel, withTrend: boolean): EntityPerformance[] {
+function buildLevel(
+  rows: NormalizedRow[],
+  level: EntityLevel,
+  withTrend: boolean,
+  split: PeriodSplit | null,
+): EntityPerformance[] {
   const groups = new Map<string, NormalizedRow[]>();
   for (const row of rows) {
     const key = entityKeyFor(row, level);
@@ -231,7 +273,7 @@ function buildLevel(rows: NormalizedRow[], level: EntityLevel, withTrend: boolea
     if (withTrend) {
       const trend = buildTrend(groupRows);
       if (trend.length > 1) entity.trend = trend;
-      const comparison = comparePeriods(groupRows);
+      const comparison = comparePeriods(groupRows, split);
       if (comparison) entity.periodComparison = comparison;
     }
     out.push(entity);
@@ -244,8 +286,9 @@ function buildLevel(rows: NormalizedRow[], level: EntityLevel, withTrend: boolea
 
 export function buildPerformanceModel(rows: NormalizedRow[]): PerformanceModel {
   const hasDates = rows.some((r) => r.date !== null);
+  const split = hasDates ? splitPeriods(rows) : null;
 
-  const account = buildLevel(rows, "account", hasDates)[0] ?? {
+  const account = buildLevel(rows, "account", hasDates, split)[0] ?? {
     id: "account:__account__",
     level: "account" as const,
     name: "Account total",
@@ -255,16 +298,16 @@ export function buildPerformanceModel(rows: NormalizedRow[]): PerformanceModel {
     metrics: { base: {}, derived: {} },
   };
 
-  const campaigns = buildLevel(rows, "campaign", hasDates);
-  const adsets = buildLevel(rows, "adset", hasDates);
-  const ads = buildLevel(rows, "ad", hasDates);
+  const campaigns = buildLevel(rows, "campaign", hasDates, split);
+  const adsets = buildLevel(rows, "adset", hasDates, split);
+  const ads = buildLevel(rows, "ad", hasDates, split);
 
   const levelsPresent: EntityLevel[] = ["account"];
   if (campaigns.length > 0) levelsPresent.push("campaign");
   if (adsets.length > 0) levelsPresent.push("adset");
   if (ads.length > 0) levelsPresent.push("ad");
 
-  return { account, campaigns, adsets, ads, levelsPresent, hasDates };
+  return { account, campaigns, adsets, ads, levelsPresent, hasDates, split };
 }
 
 /* -------------------------------------------------------------------------- */

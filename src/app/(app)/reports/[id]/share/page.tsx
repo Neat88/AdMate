@@ -5,8 +5,14 @@ import {
   getReport,
   getLatestAnalysis,
   getAnalysisModel,
+  getAnalysisFacts,
+  listPinnedInsights,
   listRecommendationsForAnalysis,
 } from "@/lib/db/queries";
+import type { AssistantAnswer } from "@/lib/assistant/types";
+import { objectiveLabel } from "@/lib/analysis/objectives";
+import { TIER_STYLE } from "@/components/report/tiers";
+import { PinnedAnswers } from "./PinnedAnswers";
 import { deserializeModel, accountKpis } from "@/lib/analysis/pipeline";
 import { getMetric } from "@/lib/analysis/metrics";
 import { PLATFORM_LABELS, METRIC_META } from "@/lib/analysis/types";
@@ -51,6 +57,19 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
     (m) => model.campaigns.some((c) => getMetric(c.metrics, m) !== null),
   );
 
+  const facts = getAnalysisFacts(session.user.id, analysis.id);
+  const dismissed = new Set(
+    listRecommendationsForAnalysis(session.user.id, analysis.id)
+      .filter((r) => r.status === "dismissed")
+      .map((r) => r.findingId),
+  );
+  const diagnoses = (facts?.diagnoses ?? []).filter((d) => !dismissed.has(d.primaryFindingId) && d.tier !== "monitor").slice(0, 8);
+  const pins = listPinnedInsights(session.user.id, id).map((p) => ({
+    id: p.id,
+    question: p.question,
+    answer: JSON.parse(p.contentJson) as AssistantAnswer,
+  }));
+
   const high = recommendations.filter((r) => r.finding.priority === "high");
   const rest = recommendations.filter((r) => r.finding.priority !== "high").slice(0, 5);
 
@@ -81,7 +100,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
           {report.periodStart && report.periodEnd
             ? ` · ${formatDate(report.periodStart)} – ${formatDate(report.periodEnd)}`
             : ""}
-          {report.objective ? ` · ${report.objective}` : ""}
+          {facts ? ` · ${objectiveLabel(facts.accountObjective)}` : report.objective ? ` · ${report.objective}` : ""}
         </p>
         <p className="mt-0.5 text-xs text-ink-500">
           Prepared {formatDateTime(analysis.createdAt)} from {report.filename}. All figures are
@@ -91,6 +110,7 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
       <section className="print-break">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-700">Summary</h2>
+        {facts ? <p className="mt-2 text-base font-medium leading-relaxed text-ink-900">{facts.briefing.verdict}</p> : null}
         <p className="mt-2 text-sm leading-relaxed text-ink-700">{analysis.summary}</p>
       </section>
 
@@ -171,6 +191,30 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-700">
           Main issues and next actions
         </h2>
+        {facts ? (
+          diagnoses.length === 0 ? (
+            <p className="mt-2 text-sm text-ink-600">No issues crossed AdMate&apos;s detection thresholds for this period.</p>
+          ) : (
+            <ol className="mt-3 space-y-4">
+              {diagnoses.map((d) => (
+                <li key={d.id} className="rounded-lg border border-ink-200 p-4 print-break">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${TIER_STYLE[d.tier].chip}`}>
+                      <span aria-hidden="true">{TIER_STYLE[d.tier].glyph}</span>
+                      {TIER_STYLE[d.tier].label}
+                    </span>
+                    <span className="text-xs text-ink-500">{d.level === "account" ? "Account-wide" : d.entityName}</span>
+                  </div>
+                  <h3 className="mt-2 text-sm font-semibold text-ink-900">{d.title}</h3>
+                  <p className="mt-1 text-sm leading-relaxed text-ink-700">{d.summary}</p>
+                  <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-ink-600">Next step: {d.actionLabel}</p>
+                  <p className="mt-1 text-sm leading-relaxed text-ink-700">{d.recommendation}</p>
+                </li>
+              ))}
+            </ol>
+          )
+        ) : (
+          <>
         {recommendations.length === 0 ? (
           <p className="mt-2 text-sm text-ink-600">
             No issues crossed AdMate&apos;s detection thresholds for this period.
@@ -202,7 +246,11 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
             ))}
           </ol>
         )}
+          </>
+        )}
       </section>
+
+      <PinnedAnswers reportId={report.id} pins={pins} />
 
       <footer className="border-t border-ink-200 pt-4 text-xs leading-relaxed text-ink-500">
         <p>
