@@ -225,6 +225,13 @@ export function DeltaChip({
   if (change === null || !Number.isFinite(change)) {
     return <span className={`text-xs text-ink-400 ${className}`}>no comparison</span>;
   }
+  if (Math.abs(change) < 0.0005) {
+    return (
+      <span className={`inline-flex items-center rounded bg-ink-100 px-1.5 py-0.5 text-xs font-medium text-ink-600 tnum ${className}`}>
+        no change
+      </span>
+    );
+  }
   const up = change > 0;
   const tone =
     isGood === null

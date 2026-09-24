@@ -33,7 +33,8 @@ export type SuggestionId =
   | "is_real"
   | "prioritize"
   | "biggest_problem"
-  | "whats_working";
+  | "whats_working"
+  | "vs_previous";
 
 /** The structured answer format: facts, interpretation and advice kept apart. */
 export interface AnswerBlocks {

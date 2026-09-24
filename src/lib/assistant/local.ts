@@ -9,7 +9,7 @@ import { analyzeDrivers, mainDrivers } from "@/lib/analysis/drivers";
 import { metricLabel, objectiveForEntity, objectiveLabel, primaryCostMetric, type Objective } from "@/lib/analysis/objectives";
 import { GLOSSARY, relevanceNote } from "@/lib/analysis/glossary";
 import type { AnswerBlocks, AssistantAnswer, SuggestionId } from "./types";
-import { describeEntityMetrics, entityForDiagnosis, safeName, type ReportContext, type Targets } from "./context";
+import { describeEntityMetrics, entityForDiagnosis, historyLines, safeName, type ReportContext, type Targets } from "./context";
 
 /**
  * The built-in analyst: deterministic answers to the suggested questions.
@@ -53,6 +53,7 @@ const FOLLOW_UPS: Partial<Record<SuggestionId, string[]>> = {
   prioritize: ["Show me the biggest problem", "What's working well?"],
   biggest_problem: ["Why do you think this is the problem?", "What if I don't want to do that?"],
   whats_working: ["What should I prioritize today?"],
+  vs_previous: ["What should I prioritize today?", "Show me the biggest problem"],
 };
 
 /** Maps a free-text question onto the closest suggestion, for the no-key path. */
@@ -65,6 +66,7 @@ export function intentOf(message: string): SuggestionId {
   if (/pause|stop|turn off|kill/.test(m)) return "should_pause";
   if (/sure|confident|certain|trust/.test(m)) return "how_sure";
   if (/real|noise|significant|chance/.test(m)) return "is_real";
+  if (/previous|last (upload|report|file|week|month)|since last|before this/.test(m)) return "vs_previous";
   if (/compare|versus|vs\.?\b/.test(m)) return "compare_peers";
   if (/good|bad|ok\b|healthy|normal/.test(m)) return "is_good";
   if (/mean|explain|what is|what does|definition/.test(m)) return "explain_metric";
@@ -267,6 +269,30 @@ function answerBlocks(ctx: ReportContext, targets: Targets, intent: SuggestionId
       });
     }
     case "compare_peers": {
+      if (targets.entities.length >= 2) {
+        const list = targets.entities.slice(0, 4);
+        const objs = list.map((e) => objectiveForEntity(e, facts.objectives, facts.accountObjective));
+        const same = objs.every((o) => o === objs[0]);
+        const m = same ? primaryCostMetric(list[0], objs[0])?.cost ?? "cpm" : "cpm";
+        const fmt = METRIC_META[m].format;
+        const ranked = list
+          .map((e) => ({ e, v: getMetric(e.metrics, m) }))
+          .filter((x): x is { e: EntityPerformance; v: number } => x.v !== null)
+          .sort((a, b) => (METRIC_META[m].higherIsBetter ? b.v - a.v : a.v - b.v));
+        return blocks({
+          observation: ranked.length
+            ? `On ${metricLabel(m, same ? objs[0] : null)}, ${who(ranked[0].e)} is doing best.`
+            : "These entities don't share a comparable metric.",
+          evidence: list.flatMap((e, i) => [
+            `${who(e)} (${objectiveLabel(objs[i])}): ${describeEntityMetrics(e, objs[i], currency, ["spend", m, "ctr", "frequency"]).join("; ")}`,
+          ]),
+          interpretation: same
+            ? `All are judged as ${objectiveLabel(objs[0]).toLowerCase()}, so this is like for like.`
+            : "They have different objectives, so only delivery cost is compared - efficiency on results isn't comparable.",
+          recommendation: ranked.length >= 2 ? `If budget moves, it would move toward ${who(ranked[0].e)} - gradually, re-measuring as you go.` : "",
+          confidence: `Figures straight from the report; ${fmt === "currency" ? "costs" : "rates"} rest on each entity's own volume.`,
+        });
+      }
       const peers = (entity.level === "campaign" ? model.campaigns : entity.level === "adset" ? model.adsets : model.ads).filter(
         (p) => objectiveForEntity(p, facts.objectives, facts.accountObjective) === objective,
       );
@@ -282,6 +308,31 @@ function answerBlocks(ctx: ReportContext, targets: Targets, intent: SuggestionId
         evidence: ranked.slice(0, 5).map((x) => `"${safeName(x.p.name)}": ${fmtValue(x.v, fmt, currency)} on ${fmtValue(getMetric(x.p.metrics, "spend"), "currency", currency)} spend`),
         interpretation: "Only entities with the same objective are compared, so this is like for like.",
         confidence: "Figures straight from the report.",
+      });
+    }
+    case "vs_previous": {
+      if (!ctx.history) {
+        return blocks({
+          observation: "There is no earlier upload for this workspace and platform to compare with.",
+          interpretation: "Within this file, AdMate compares the latest half of the period with the half before it instead.",
+          recommendation: "Upload next period's export to the same workspace and AdMate will compare the two automatically.",
+        });
+      }
+      const h = ctx.history;
+      const lines = historyLines(ctx);
+      const worse = h.campaigns.filter((c) => c.cost?.worsened && c.cost.strength !== "weak");
+      return blocks({
+        observation: `Compared with "${safeName(h.previous.filename)}":`,
+        evidence: lines.slice(1, 7).map((l) => l.replace(/^\s*-\s*/, "")),
+        interpretation: worse.length
+          ? `${worse.length} campaign(s) got meaningfully less efficient: ${worse.map((c) => `"${safeName(c.name)}"`).join(", ")}.`
+          : "No campaign got meaningfully less efficient since the previous upload.",
+        recommendation: worse.length ? `Look at "${safeName(worse[0].name)}" first.` : "",
+        confidence: "Each change is tested on the underlying counts; \"could be noise\" means the volumes are too small to tell.",
+        limitations:
+          h.previousDays && h.currentDays && h.previousDays !== h.currentDays
+            ? ["The two uploads cover different numbers of days, so totals are compared per day."]
+            : [],
       });
     }
     case "whats_working": {

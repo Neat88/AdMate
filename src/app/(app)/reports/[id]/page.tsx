@@ -28,6 +28,8 @@ import { WhatChanged } from "@/components/report/WhatChanged";
 import { ReanalyzeButton } from "@/components/report/ReanalyzeButton";
 import { healthKey } from "@/components/report/health";
 import { TIER_ORDER } from "@/components/report/tiers";
+import { loadHistory } from "@/lib/analysis/report-history";
+import { VsPreviousUpload } from "@/components/report/VsPreviousUpload";
 import { deserializeModel, accountKpis } from "@/lib/analysis/pipeline";
 import { PLATFORM_LABELS, BASE_METRICS, DERIVED_METRICS } from "@/lib/analysis/types";
 import type { MetricKey } from "@/lib/analysis/types";
@@ -91,6 +93,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
     insights[r.findingId] = r.insight;
     recs[r.findingId] = { id: r.id, status: r.status, note: r.note };
   }
+
+  const history = loadHistory(session.user.id, report, model, facts);
 
   // Worst tier per entity, for the health chips in the breakdown table.
   const health: Record<string, Tier> = {};
@@ -167,6 +171,8 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           comparisonLabel={facts.comparisonLabel}
         />
 
+        {history ? <VsPreviousUpload history={history} objective={facts.accountObjective} currency={report.currency} /> : null}
+
         <section>
           <h2 className="mb-3 text-sm font-semibold text-ink-900">
             Account performance
@@ -197,6 +203,7 @@ export default async function ReportPage({ params }: { params: Promise<{ id: str
           objectives={facts.objectives}
           accountObjective={facts.accountObjective}
           health={health}
+          reportId={report.id}
         />
 
         <Card>

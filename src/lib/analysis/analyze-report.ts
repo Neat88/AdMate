@@ -1,7 +1,8 @@
 import { runAnalysis, serializeModel, type AnalysisOutput } from "./pipeline";
 import type { NormalizedRow, Platform } from "./types";
 import type { DataIssue } from "./parse";
-import { listAlertRules, saveAnalysis, saveAlertEvents } from "@/lib/db/queries";
+import type { Objective } from "./objectives";
+import { carryOverStatuses, getLatestAnalysis, listAlertRules, saveAnalysis, saveAlertEvents } from "@/lib/db/queries";
 
 /**
  * Runs the full pipeline for a stored report and persists the result. Shared by
@@ -19,7 +20,9 @@ export async function analyzeAndSaveReport(input: {
   periodStart: string | null;
   periodEnd: string | null;
   issues: DataIssue[];
+  objectiveOverrides?: Record<string, Objective>;
 }): Promise<{ analysisId: string; analysis: AnalysisOutput }> {
+  const previous = getLatestAnalysis(input.userId, input.reportId);
   const rules = listAlertRules(input.userId, input.workspaceId);
   const analysis = await runAnalysis({
     rows: input.rows,
@@ -30,6 +33,7 @@ export async function analyzeAndSaveReport(input: {
     periodEnd: input.periodEnd,
     alertRules: rules,
     issues: input.issues,
+    objectiveOverrides: input.objectiveOverrides,
   });
 
   const analysisId = saveAnalysis({
@@ -44,5 +48,6 @@ export async function analyzeAndSaveReport(input: {
     facts: analysis.facts,
   });
   saveAlertEvents(input.userId, analysisId, input.reportId, analysis.alertEvents);
+  if (previous) carryOverStatuses(input.userId, previous.id, analysisId);
   return { analysisId, analysis };
 }

@@ -2,7 +2,7 @@ import { buildPerformanceModel, getMetric } from "./metrics";
 import { detectFindings } from "./detectors";
 import { evaluateAlerts } from "./alerts";
 import { buildAccountSummary, buildAnalysisContext } from "./summary";
-import { accountObjective as resolveAccountObjective, resolveCampaignObjectives } from "./objectives";
+import { accountObjective as resolveAccountObjective, resolveCampaignObjectives, type Objective } from "./objectives";
 import { buildFacts, type ReportFacts } from "./facts";
 import type { DataIssue } from "./parse";
 import { generateInsights, type InsightBundle } from "@/lib/ai/insights";
@@ -31,6 +31,8 @@ export interface AnalysisInput {
   alertRules: AlertRule[];
   /** Data-quality issues from parsing, used to judge how far to trust the report. */
   issues?: DataIssue[];
+  /** Per-campaign objective corrections made by the user. */
+  objectiveOverrides?: Record<string, Objective>;
 }
 
 export interface AnalysisOutput {
@@ -46,7 +48,7 @@ export interface AnalysisOutput {
 export async function runAnalysis(input: AnalysisInput): Promise<AnalysisOutput> {
   const model = buildPerformanceModel(input.rows);
 
-  const objectives = resolveCampaignObjectives(model, input.rows, input.objective);
+  const objectives = resolveCampaignObjectives(model, input.rows, input.objective, input.objectiveOverrides);
   const accountObjective = resolveAccountObjective(model, objectives, input.objective);
   const { findings } = detectFindings(model, input.currency, { objectives, accountObjective });
   const facts = buildFacts({

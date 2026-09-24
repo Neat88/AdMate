@@ -18,6 +18,7 @@ import {
   updateConversation,
 } from "@/lib/db/queries";
 import { deserializeModel } from "@/lib/analysis/pipeline";
+import { loadHistory } from "@/lib/analysis/report-history";
 import type { Finding } from "@/lib/analysis/detectors";
 import type { NormalizedRow } from "@/lib/analysis/types";
 import { METRIC_META } from "@/lib/analysis/types";
@@ -49,6 +50,7 @@ const focusSchema = z.discriminatedUnion("kind", [
 const SUGGESTION_IDS = [
   "explain_metric", "why_change", "is_good", "what_to_do", "why_problem", "should_pause", "alternatives", "how_sure",
   "entity_health", "entity_drivers", "compare_peers", "which_first", "is_real", "prioritize", "biggest_problem", "whats_working",
+  "vs_previous",
 ] as const;
 const bodySchema = z.object({
   message: z.string().trim().min(1).max(600),
@@ -72,12 +74,14 @@ function loadContext(userId: string, reportId: string): ReportContext | null {
   const findings = new Map<string, Finding>();
   for (const r of listRecommendationsForAnalysis(userId, analysis.id)) findings.set(r.findingId, r.finding);
   let rows: NormalizedRow[] | null = null;
+  const model = deserializeModel(modelJson);
   return {
     report,
-    model: deserializeModel(modelJson),
+    model,
     facts,
     findings,
     loadRows: () => (rows ??= getReportRows(userId, reportId)),
+    history: loadHistory(userId, report, model, facts),
   };
 }
 

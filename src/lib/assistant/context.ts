@@ -19,6 +19,7 @@ import {
 import { GLOSSARY, relevanceNote } from "@/lib/analysis/glossary";
 import type { ReportRecord } from "@/lib/db/queries";
 import type { AssistantFocus } from "./types";
+import type { HistoryComparison, MetricChange } from "@/lib/analysis/history";
 import { findEntity } from "./openers";
 
 /**
@@ -39,6 +40,8 @@ export interface ReportContext {
   findings: Map<string, Finding>;
   /** Loaded lazily - only a daily-trend question needs raw rows. */
   loadRows: () => NormalizedRow[];
+  /** Comparison with the previous upload, when there is one. */
+  history?: HistoryComparison | null;
 }
 
 export interface Targets {
@@ -299,6 +302,8 @@ export function reportHeader(ctx: ReportContext): string {
     lines.push("What changed at account level:");
     for (const w of facts.whatChanged) lines.push(`  - ${describeChange(w, facts.accountObjective, report.currency)}`);
   }
+  if (ctx.history) lines.push(...historyLines(ctx));
+  else lines.push("There is no earlier upload for this workspace and platform to compare with.");
   lines.push(`Data confidence: ${facts.briefing.dataConfidence.level} — ${facts.briefing.dataConfidence.reasons.join(" ")}`);
   lines.push(`NOT in this report (never claim knowledge of these): ${NOT_IN_EXPORTS}.`);
   return lines.join("\n");
@@ -431,4 +436,27 @@ export function toolCompare(ctx: ReportContext, names: string[]): string {
       return [`${entityTitle(e)} — ${objectiveLabel(objective)}`, ...describeEntityMetrics(e, objective, ctx.report.currency, keys).map((l) => `- ${l}`)].join("\n");
     })
     .join("\n\n");
+}
+
+function changeLine(m: MetricChange, objective: Objective | "mixed", currency: string): string {
+  const fmt = METRIC_META[m.metric].format;
+  const strength = m.strength ? `; ${m.strength === "strong" ? "likely real" : m.strength === "moderate" ? "probably real" : "could be noise"}` : "";
+  return `${metricLabel(m.metric, objective)}${m.perDay ? " per day" : ""}${m.scope ? ` (${m.scope.toLowerCase()})` : ""}: ${fmtValue(m.previous, fmt, currency)} → ${fmtValue(m.current, fmt, currency)}${m.changePct !== null ? ` (${fmtPct(m.changePct)})` : ""}${strength}`;
+}
+
+/** Report-over-report lines for the assistant. */
+export function historyLines(ctx: ReportContext): string[] {
+  const h = ctx.history;
+  if (!h) return [];
+  const { facts, report } = ctx;
+  const lines = [
+    `Compared with the previous upload "${safeName(h.previous.filename)}" (${h.previous.periodStart ?? "?"} to ${h.previous.periodEnd ?? "?"}${h.previousDays && h.currentDays ? `, ${h.previousDays} days vs ${h.currentDays} days in this upload` : ""}):`,
+    ...h.account.map((m) => `  - ${changeLine(m, facts.accountObjective, report.currency)}`),
+  ];
+  for (const c of h.campaigns.filter((x) => x.cost).slice(0, 12)) {
+    lines.push(`  - Campaign "${safeName(c.name)}": ${changeLine(c.cost!, c.objective, report.currency)}; spend ${changeLine(c.spend, c.objective, report.currency).split(": ")[1]}`);
+  }
+  if (h.newCampaigns.length) lines.push(`  - New since the previous upload: ${h.newCampaigns.map((n) => `"${safeName(n)}"`).join(", ")}`);
+  if (h.stoppedCampaigns.length) lines.push(`  - In the previous upload but not this one: ${h.stoppedCampaigns.map((n) => `"${safeName(n)}"`).join(", ")}`);
+  return lines;
 }

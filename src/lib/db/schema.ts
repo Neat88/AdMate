@@ -206,6 +206,24 @@ const MIGRATIONS: ((db: Database.Database) => void)[] = [
       );
     `);
   },
+  // 2: user corrections to campaign objectives, and answers pinned to the client report.
+  (db) => {
+    const reports = new Set(
+      (db.prepare("PRAGMA table_info(reports)").all() as { name: string }[]).map((c) => c.name),
+    );
+    if (!reports.has("objective_overrides_json")) db.exec("ALTER TABLE reports ADD COLUMN objective_overrides_json TEXT");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pinned_insights (
+        id           TEXT PRIMARY KEY,
+        user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        report_id    TEXT NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+        question     TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pins_report ON pinned_insights(report_id, user_id);
+    `);
+  },
 ];
 
 function runVersionedMigrations(db: Database.Database): void {

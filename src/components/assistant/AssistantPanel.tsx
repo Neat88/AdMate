@@ -224,7 +224,7 @@ export function AssistantPanel({
               ) : entry.role === "user" ? (
                 <UserBubble key={entry.id} message={entry} />
               ) : entry.answer ? (
-                <AnswerView key={entry.id} answer={entry.answer} />
+                <AnswerView key={entry.id} answer={entry.answer} messageId={entry.id} reportId={reportId} />
               ) : null,
             )
           )}
@@ -308,8 +308,23 @@ function UserBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-function AnswerView({ answer }: { answer: AssistantAnswer }) {
+function AnswerView({ answer, messageId, reportId }: { answer: AssistantAnswer; messageId: string; reportId: string }) {
   const b = answer.blocks;
+  const [pin, setPin] = useState<"idle" | "saving" | "pinned" | "error">("idle");
+  const pinnable = !messageId.startsWith("local-");
+  const pinIt = async () => {
+    setPin("saving");
+    try {
+      const res = await fetch(`/api/reports/${reportId}/pins`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      setPin(res.ok ? "pinned" : "error");
+    } catch {
+      setPin("error");
+    }
+  };
   return (
     <div className="space-y-2.5 rounded-xl border border-ink-200 px-3 py-3 text-sm leading-relaxed">
       {b.observation ? <Block label="What happened" tone="fact">{b.observation}</Block> : null}
@@ -345,6 +360,17 @@ function AnswerView({ answer }: { answer: AssistantAnswer }) {
           </span>
         ) : null}
         {answer.notice ? <span className="text-[11px] text-ink-500">{answer.notice}</span> : null}
+        {pinnable ? (
+          <button
+            type="button"
+            onClick={() => void pinIt()}
+            disabled={pin === "saving" || pin === "pinned"}
+            className="ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50 disabled:text-ink-500 disabled:hover:bg-transparent"
+            title="Add this answer to the printable client report"
+          >
+            {pin === "pinned" ? "Pinned to client report ✓" : pin === "saving" ? "Pinning…" : pin === "error" ? "Couldn't pin - retry" : "Pin to client report"}
+          </button>
+        ) : null}
       </div>
     </div>
   );

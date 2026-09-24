@@ -119,7 +119,7 @@ test("promised outcomes are caught", () => {
 test("the built-in analyst answers every suggested question without an API key", () => {
   const ids = [
     "explain_metric", "why_change", "is_good", "what_to_do", "why_problem", "should_pause", "alternatives", "how_sure",
-    "entity_health", "entity_drivers", "compare_peers", "which_first", "is_real", "prioritize", "biggest_problem", "whats_working",
+    "entity_health", "entity_drivers", "compare_peers", "which_first", "is_real", "prioritize", "biggest_problem", "whats_working", "vs_previous",
   ] as const;
   const d = ctx.facts.diagnoses[0];
   for (const id of ids) {

@@ -16,7 +16,13 @@ import { getMetric, type PerformanceModel } from "./metrics";
 export type Objective = "sales" | "leads" | "traffic" | "awareness" | "engagement" | "video" | "app";
 
 /** Where the objective came from - shown to the user so a guess is never presented as fact. */
-export type ObjectiveSource = "result_type" | "campaign_name" | "report_setting" | "data_shape";
+export type ObjectiveSource = "user" | "result_type" | "campaign_name" | "report_setting" | "data_shape";
+
+export const OBJECTIVES: Objective[] = ["sales", "leads", "traffic", "awareness", "engagement", "video", "app"];
+
+export function isObjective(v: unknown): v is Objective {
+  return typeof v === "string" && (OBJECTIVES as string[]).includes(v);
+}
 
 export interface ObjectiveResolution {
   objective: Objective;
@@ -173,6 +179,7 @@ function dataShapeObjective(entity: EntityPerformance): Objective {
 
 /**
  * Resolves each campaign's objective. Order of precedence:
+ *   0. the user's own correction,
  *   1. a result-type column in the file (the platform said so),
  *   2. an objective token in the campaign name,
  *   3. the objective chosen at upload,
@@ -182,6 +189,8 @@ export function resolveCampaignObjectives(
   model: PerformanceModel,
   rows: NormalizedRow[],
   reportSetting: string | null,
+  /** Corrections the user made per campaign; these always win. */
+  overrides: Record<string, Objective> = {},
 ): Record<string, ObjectiveResolution> {
   const setting = objectiveFromSetting(reportSetting);
 
@@ -199,6 +208,11 @@ export function resolveCampaignObjectives(
 
   const out: Record<string, ObjectiveResolution> = {};
   for (const campaign of model.campaigns) {
+    const override = overrides[campaign.name];
+    if (override && isObjective(override)) {
+      out[campaign.name] = { objective: override, source: "user", detail: "your correction" };
+      continue;
+    }
     const votes = resultTypeVotes.get(campaign.name);
     if (votes && votes.size > 0) {
       const [objective] = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];

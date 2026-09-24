@@ -53,7 +53,7 @@ built-in default and will return a clear 503 from the auth routes rather than st
 
 | Command | What it does |
 | --- | --- |
-| `npm test` | Runs the analysis-engine, assistant and AI-validation test suites (60 tests) |
+| `npm test` | Runs the analysis-engine, assistant, feature and AI-validation test suites (64 tests) |
 | `npm run typecheck` | TypeScript, no emit |
 | `npm run build` | Production build |
 | `npm run db:reset` | Deletes the database and re-seeds |
@@ -142,7 +142,24 @@ biggest improvement, best opportunity and how far to trust the data - followed b
 
 Reports analysed before v2 show an "analysed with an earlier version" banner with a
 **Re-analyse** button that re-runs the engine on the stored rows (no re-upload needed).
-Recommendation statuses from the earlier analysis are not carried over.
+Recommendation statuses and notes carry over to the new analysis.
+
+### Working across uploads
+
+- **Correct an objective.** Each campaign row in the breakdown table has an objective
+  selector. Choosing one re-analyses the report with it ("your correction" wins over any
+  detection); "auto" returns to AdMate's own detection.
+- **Compared with your previous upload.** When the same workspace has an earlier upload
+  for the same platform and currency, the report compares against it: account KPIs,
+  each campaign's main KPI (with the same statistical test the detectors use), and
+  campaigns that are new or gone. Totals are compared per day when the two files cover
+  different numbers of days; mixed-objective accounts are compared per objective. The
+  assistant can answer "how does this compare with my last upload?".
+- **Side by side.** Tick 2-4 rows in the breakdown table to compare them; the best value
+  per metric is marked, and mixing objectives is flagged as not like-for-like.
+- **Pin to client report.** Any assistant answer can be pinned to the printable client
+  report. Pins are created from the stored, validated answer - never from text sent by
+  the browser - and can be removed from the client report page.
 
 ### Functional, but improved by an API key
 
@@ -335,7 +352,7 @@ being exact — they informed which *problems* to solve, not what to copy.
 npm test
 ```
 
-60 tests, no network required:
+64 tests, no network required:
 
 - **Value coercion** — zero vs missing, currency symbols, `1,234.56` vs `1.234,56`, parenthesised
   negatives, percentages, Excel serial dates, ambiguous `dd/mm` vs `mm/dd`.

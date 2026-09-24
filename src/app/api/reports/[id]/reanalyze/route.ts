@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser, UnauthorizedError } from "@/lib/db/auth";
-import { getReport, getReportIssues, getReportRows } from "@/lib/db/queries";
+import { getObjectiveOverrides, getReport, getReportIssues, getReportRows } from "@/lib/db/queries";
 import { analyzeAndSaveReport } from "@/lib/analysis/analyze-report";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -40,6 +40,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       periodStart: report.periodStart,
       periodEnd: report.periodEnd,
       issues: getReportIssues(user.id, id),
+      objectiveOverrides: getObjectiveOverrides(user.id, id),
     });
     return NextResponse.json({ ok: true, analysisId, findingCount: analysis.findings.length });
   } catch (error) {

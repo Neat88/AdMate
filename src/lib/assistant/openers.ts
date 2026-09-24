@@ -51,6 +51,7 @@ const SUGGESTIONS: Record<AssistantFocus["kind"], Suggestion[]> = {
     { id: "biggest_problem", text: "Show me the biggest problem" },
     { id: "whats_working", text: "What's working well?" },
     { id: "which_first", text: "Which ad should I check first?" },
+    { id: "vs_previous", text: "How does this compare with my previous upload?" },
   ],
   metric: [
     { id: "why_change", text: "Why did this change?" },

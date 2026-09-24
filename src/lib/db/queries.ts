@@ -6,6 +6,7 @@ import type { Finding } from "@/lib/analysis/detectors";
 import type { Insight } from "@/lib/ai/insights";
 import type { ReportFacts } from "@/lib/analysis/facts";
 import type { Tier, ActionType } from "@/lib/analysis/diagnoses";
+import type { Objective } from "@/lib/analysis/objectives";
 import type { NormalizedRow, Platform } from "@/lib/analysis/types";
 import type { AlertEvent, AlertRule } from "@/lib/analysis/alerts";
 import { defaultRules } from "@/lib/analysis/alerts";
@@ -745,4 +746,131 @@ export function recordUsage(userId: string, inputTokens: number, outputTokens: n
          input_tokens = input_tokens + excluded.input_tokens, output_tokens = output_tokens + excluded.output_tokens`,
     )
     .run(userId, today(), inputTokens, outputTokens);
+}
+
+/* --------------------------- objective overrides ------------------------- */
+
+export function getObjectiveOverrides(userId: string, reportId: string): Record<string, Objective> {
+  const row = getDb()
+    .prepare("SELECT objective_overrides_json AS j FROM reports WHERE id = ? AND user_id = ?")
+    .get(reportId, userId) as { j: string | null } | undefined;
+  return row?.j ? (JSON.parse(row.j) as Record<string, Objective>) : {};
+}
+
+export function setObjectiveOverrides(userId: string, reportId: string, overrides: Record<string, Objective>): boolean {
+  const result = getDb()
+    .prepare("UPDATE reports SET objective_overrides_json = ? WHERE id = ? AND user_id = ?")
+    .run(Object.keys(overrides).length ? JSON.stringify(overrides) : null, reportId, userId);
+  return result.changes > 0;
+}
+
+/* ----------------------------- pinned insights --------------------------- */
+
+export interface PinnedInsight {
+  id: string;
+  question: string;
+  contentJson: string;
+  createdAt: string;
+}
+
+export function listPinnedInsights(userId: string, reportId: string): PinnedInsight[] {
+  return getDb()
+    .prepare(
+      `SELECT id, question, content_json AS contentJson, created_at AS createdAt
+       FROM pinned_insights WHERE report_id = ? AND user_id = ? ORDER BY created_at`,
+    )
+    .all(reportId, userId) as PinnedInsight[];
+}
+
+export function addPinnedInsight(userId: string, reportId: string, question: string, content: unknown): string {
+  const id = newId("pin");
+  getDb()
+    .prepare("INSERT INTO pinned_insights (id, user_id, report_id, question, content_json, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, userId, reportId, question, JSON.stringify(content), now());
+  return id;
+}
+
+export function deletePinnedInsight(userId: string, reportId: string, pinId: string): boolean {
+  return (
+    getDb()
+      .prepare("DELETE FROM pinned_insights WHERE id = ? AND report_id = ? AND user_id = ?")
+      .run(pinId, reportId, userId).changes > 0
+  );
+}
+
+/**
+ * Copies the user's status and note from one analysis's recommendations to
+ * the matching ones in a newer analysis of the same report, so re-analysing
+ * never throws away "In review" / "Action taken" decisions. Findings match on
+ * their code and entity; finding ids are positional and cannot be used.
+ */
+export function carryOverStatuses(userId: string, fromAnalysisId: string, toAnalysisId: string): number {
+  const result = getDb()
+    .prepare(
+      `UPDATE recommendations AS r
+       SET status = o.status, note = o.note, updated_at = o.updated_at
+       FROM recommendations AS o
+       WHERE r.analysis_id = ? AND r.user_id = ?
+         AND o.analysis_id = ? AND o.user_id = ?
+         AND o.code = r.code AND o.entity_level = r.entity_level AND o.entity_name = r.entity_name
+         AND (o.status != 'new' OR o.note IS NOT NULL)`,
+    )
+    .run(toAnalysisId, userId, fromAnalysisId, userId);
+  return result.changes;
+}
+
+/**
+ * An assistant answer and the question that prompted it, for pinning. Scoped
+ * by user and report through the conversation, so only an answer the user
+ * actually received on this report can be pinned to it.
+ */
+export function getAnswerWithQuestion(
+  userId: string,
+  reportId: string,
+  messageId: string,
+): { question: string; contentJson: string } | null {
+  const db = getDb();
+  const answer = db
+    .prepare(
+      `SELECT m.content_json AS contentJson, m.created_at AS createdAt, m.conversation_id AS conversationId
+       FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE m.id = ? AND m.user_id = ? AND m.role = 'assistant' AND c.report_id = ? AND c.user_id = ?`,
+    )
+    .get(messageId, userId, reportId, userId) as { contentJson: string; createdAt: string; conversationId: string } | undefined;
+  if (!answer) return null;
+  const question = db
+    .prepare(
+      `SELECT content_json AS contentJson FROM messages
+       WHERE conversation_id = ? AND user_id = ? AND role = 'user' AND created_at <= ?
+       ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+    )
+    .get(answer.conversationId, userId, answer.createdAt) as { contentJson: string } | undefined;
+  const q = question ? ((JSON.parse(question.contentJson) as { text?: string }).text ?? "") : "";
+  return { question: q, contentJson: answer.contentJson };
+}
+
+/**
+ * The upload to compare a report against: the most recent earlier report in
+ * the same workspace and platform that has a stored analysis, preferring one
+ * whose period ends before this one starts (so the two do not overlap).
+ */
+export function findPreviousReport(userId: string, report: ReportRecord): ReportRecord | null {
+  const candidates = getDb()
+    .prepare(
+      `SELECT r.id, r.workspace_id AS workspaceId, r.filename, r.platform, r.currency, r.objective,
+              r.period_start AS periodStart, r.period_end AS periodEnd, r.row_count AS rowCount, r.created_at AS createdAt
+       FROM reports r
+       WHERE r.user_id = ? AND r.workspace_id = ? AND r.platform = ? AND r.currency = ? AND r.id != ?
+         AND r.created_at < ?
+         AND EXISTS (SELECT 1 FROM analyses a WHERE a.report_id = r.id)
+       ORDER BY COALESCE(r.period_end, r.created_at) DESC, r.created_at DESC
+       LIMIT 10`,
+    )
+    .all(userId, report.workspaceId, report.platform, report.currency, report.id, report.createdAt) as ReportRecord[];
+  if (candidates.length === 0) return null;
+  if (report.periodStart) {
+    const before = candidates.find((c) => c.periodEnd !== null && c.periodEnd < report.periodStart!);
+    if (before) return before;
+  }
+  return candidates[0];
 }

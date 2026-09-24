@@ -31,6 +31,7 @@ export function AnalysisTabs({
   objectives,
   accountObjective,
   health,
+  reportId,
 }: {
   model: PerformanceModel;
   currency: string;
@@ -39,6 +40,7 @@ export function AnalysisTabs({
   objectives?: Record<string, ObjectiveResolution>;
   accountObjective?: Objective | "mixed";
   health?: Record<string, Tier>;
+  reportId?: string;
 }) {
   const levels = model.levelsPresent.filter((l) => l !== "account");
   const [level, setLevel] = useState<EntityLevel>(levels[0] ?? "account");
@@ -94,6 +96,7 @@ export function AnalysisTabs({
           }
         />
         <PerformanceTable
+          key={level}
           entities={entities}
           currency={currency}
           availableMetrics={availableMetrics}
@@ -102,6 +105,7 @@ export function AnalysisTabs({
           objectives={objectives}
           accountObjective={accountObjective}
           health={health}
+          reportId={reportId}
         />
       </Card>
     </div>
